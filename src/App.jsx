@@ -2,8 +2,6 @@ import {useState, useEffect} from 'react'
 
 function StudyRoom(props) {
   
-
-
   useEffect( () =>  {
     console.log(props.name + " loaded!")
   }, [])
@@ -20,24 +18,32 @@ function StudyRoom(props) {
 
 
 function App()  {
-  const rooms = ["UPSC Room", "NEET Room", "JEE Room", "CA Room"]
-  const[counts,setCounts] = useState([25,25,25,25])
+ const [rooms, setRooms] = useState([
+  {name: "UPSC Room", count: 25},
+  {name: "NEET Room", count: 25},
+  {name: "JEE Room", count: 25},
+  {name: "CA Room", count: 25}
+ ])
+
+
+ 
+
 
 function increaseCount(index)  {
-  const newCounts = [...counts]
-  newCounts[index] = newCounts[index]+1
-  setCounts(newCounts)
+  const newRooms = [...rooms]
+  newRooms[index].count = newRooms[index].count + 1
+  setRooms(newRooms)
 }
 
 return (
   <div>
     <h1>PadhakuGang</h1>
-    <p>Total students: {counts.reduce((a,b) => a+b, 0)}</p>
+    <p>Total students: {rooms.reduce((sum,room) => sum + room.count, 0)}</p>
     {rooms.map((room,index) => (
       <StudyRoom
-        key = {room}
-        name ={room}
-        count = {counts[index]}
+        key = {room.name}
+        name ={room.name}
+        count = {room.count}
         onJoin = {() => increaseCount(index)}
         />      
     ))}
