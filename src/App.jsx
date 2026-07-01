@@ -25,8 +25,10 @@ function App()  {
   {name: "CA Room", count: 25}
  ])
 
-
- 
+ const[nickname, setNickname] = useState("")
+ const[isSubmitted, setIsSubmitted] = useState(false)
+ const[exam, setExam] = useState("") 
+ const[topic, setTopic] = useState("")
 
 
 function increaseCount(index)  {
@@ -47,6 +49,35 @@ return (
         onJoin = {() => increaseCount(index)}
         />      
     ))}
+
+    <input type = "text"      
+    placeholder = "Enter your nickname"    
+    value = {nickname} 
+    onChange = {(e) => setNickname(e.target.value)} 
+    />
+
+    {isSubmitted && <p>Your nickname: {nickname}</p> }
+
+
+
+<input type = "text"
+ placeholder = "Preparing for? (UPSC, NEET....)"
+ value = {exam}
+ onChange = {(e) => setExam(e.target.value)}
+ />
+ {isSubmitted && <p>Preparing for: {exam}</p>}
+
+  <input type = "text"
+  placeholder = "Today's topic?"
+  value = {topic}
+  onChange = {(e) => setTopic(e.target.value)}
+  />
+  {isSubmitted && <p>Today's topic: {topic}</p>}
+
+  <button onClick = {() => setIsSubmitted(true)}>Join</button>
+{isSubmitted ? <p>Welcome, {nickname} | {exam} |  {topic}</p> : null}
+
+
   </div>
   )
 }
