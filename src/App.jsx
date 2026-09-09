@@ -3,6 +3,7 @@ import Home from './Home.jsx'
 import Notes from './Notes.jsx'
 import { UserContext } from './UserContext.jsx'
 import Nav from './Nav.jsx'
+import StudyRoom from './StudyRoom.jsx'
 
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
       <Routes>
         <Route path = "/" element = {<Home />} />
         <Route path = "/notes" element = {<Notes />} />
+        <Route path = "/studyroom" element = {<StudyRoom />} />
         </Routes>
     </div>
     </UserContext.Provider>
