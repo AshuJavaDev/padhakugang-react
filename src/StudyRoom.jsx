@@ -60,9 +60,20 @@ function StudyRoom() {
         setJoined(true);
     }
 
-    useEffect(() => {
+      useEffect(() => {
         if (!joined) return;
 
+        // Fetch current participants BEFORE connecting, so late joiners see who's already here
+        fetch(`http://localhost:8080/api/rooms/${joinData.room}/participants`)
+            .then((res) => res.json())
+            .then((data) => {
+                setParticipants(data);
+            })
+            .catch((err) => {
+                console.error("Failed to fetch participants:", err);
+            });
+
+        
         const stompClient = new Client({
             webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
             reconnectDelay: 5000,
