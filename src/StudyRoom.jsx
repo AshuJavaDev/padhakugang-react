@@ -33,7 +33,6 @@ const EXAM_OPTIONS = [
 function StudyRoom() {
     const [joined, setJoined] = useState(false);
 
-    // All join form fields live in one object — easier to manage than 8 separate useStates
     const [joinData, setJoinData] = useState({
         name: "",
         mood: "",
@@ -44,10 +43,11 @@ function StudyRoom() {
         subject: "",
         bio: "",
         lookingFor: "",
-        room: ROOMS[0].id, // default to first room
+        room: ROOMS[0].id,
     });
 
     const [messages, setMessages] = useState([]);
+    const [participants, setParticipants] = useState([]); // NEW: who's in the room
     const [messageInput, setMessageInput] = useState("");
     const stompClientRef = useRef(null);
 
@@ -69,7 +69,46 @@ function StudyRoom() {
             onConnect: () => {
                 stompClient.subscribe(`/topic/room/${joinData.room}`, (message) => {
                     const received = JSON.parse(message.body);
-                    setMessages((prev) => [...prev, received]);
+
+
+
+                    if (received.type === "JOIN") {
+                        setParticipants((prev) => {
+                            const exists = prev.some(
+                                (p) => p.studentName === received.studentName
+                            );
+                            if (exists) return prev;
+                            return [...prev, received];
+                        });
+                    } else if (received.type === "LEAVE") {
+                        setParticipants((prev) =>
+                            prev.filter((p) => p.studentName !== received.studentName)
+                        );
+                    } else {
+                        setMessages((prev) => [...prev, received]);
+                    }
+
+
+
+                });
+
+                // NOW that we're connected, announce ourselves as a JOIN message
+                const joinMessage = {
+                    type: "JOIN",
+                    studentName: joinData.name,
+                    roomId: joinData.room,
+                    mood: joinData.mood,
+                    exam: joinData.exam,
+                    college: joinData.college,
+                    city: joinData.city,
+                    subject: joinData.subject,
+                    bio: joinData.bio,
+                    lookingFor: joinData.lookingFor,
+                };
+
+                stompClient.publish({
+                    destination: `/app/chat/${joinData.room}`,
+                    body: JSON.stringify(joinMessage),
                 });
             },
         });
@@ -86,6 +125,7 @@ function StudyRoom() {
         if (!messageInput.trim()) return;
 
         const chatMessage = {
+            type: "CHAT",
             studentName: joinData.name,
             content: messageInput,
             roomId: joinData.room,
@@ -106,7 +146,6 @@ function StudyRoom() {
             <div style={{ maxWidth: 420, margin: "0 auto" }}>
                 <h2>Join a Study Room</h2>
 
-                {/* Required */}
                 <input
                     type="text"
                     placeholder="Your name *"
@@ -114,7 +153,6 @@ function StudyRoom() {
                     onChange={(e) => updateField("name", e.target.value)}
                 />
 
-                {/* Room selection */}
                 <div style={{ marginTop: 10 }}>
                     <label>Room: </label>
                     <select
@@ -129,7 +167,6 @@ function StudyRoom() {
                     </select>
                 </div>
 
-                {/* Mood quick-select */}
                 <div style={{ marginTop: 10 }}>
                     <label>Mood today: </label>
                     {MOODS.map((m) => (
@@ -152,32 +189,17 @@ function StudyRoom() {
                     ))}
                 </div>
 
-                {/* Exam preparing for */}
+
                 <div style={{ marginTop: 10 }}>
-                    <label>Exam preparing for: </label>
-                    <select
+                    <input
+                        type="text"
+                        placeholder="Name of upcoming exam preparing for"
                         value={joinData.exam}
                         onChange={(e) => updateField("exam", e.target.value)}
-                    >
-                        <option value="">-- Select --</option>
-                        {EXAM_OPTIONS.map((ex) => (
-                            <option key={ex} value={ex}>
-                                {ex}
-                            </option>
-                        ))}
-                    </select>
-                    {joinData.exam === "Other" && (
-                        <input
-                            type="text"
-                            placeholder="Which exam?"
-                            value={joinData.examOther}
-                            onChange={(e) => updateField("examOther", e.target.value)}
-                            style={{ marginLeft: 6 }}
-                        />
-                    )}
+                    />
                 </div>
 
-                {/* Free text fields */}
+
                 <div style={{ marginTop: 10 }}>
                     <input
                         type="text"
@@ -211,7 +233,6 @@ function StudyRoom() {
                     />
                 </div>
 
-                {/* Looking for */}
                 <div style={{ marginTop: 10 }}>
                     <label>Looking for: </label>
                     <select
@@ -235,42 +256,102 @@ function StudyRoom() {
     }
 
     return (
-        <div style={{ maxWidth: 420, margin: "0 auto" }}>
-            <h2>
-                Welcome, {joinData.name}!
-                {currentMood && (
-                    <span
-                        title={currentMood.label}
-                        style={{
-                            display: "inline-block",
-                            width: 12,
-                            height: 12,
-                            borderRadius: "50%",
-                            background: currentMood.color,
-                            marginLeft: 8,
-                        }}
-                    />
-                )}
-            </h2>
-            <p style={{ fontSize: 12, color: "#666" }}>
-                Room: {ROOMS.find((r) => r.id === joinData.room)?.label}
-            </p>
+        <div style={{ display: "flex", maxWidth: 700, margin: "0 auto", gap: 20 }}>
+            {/* LEFT: Chat */}
+            <div style={{ flex: 2 }}>
+                <h2>
+                    Welcome, {joinData.name}!
+                    {currentMood && (
+                        <span
+                            title={currentMood.label}
+                            style={{
+                                display: "inline-block",
+                                width: 12,
+                                height: 12,
+                                borderRadius: "50%",
+                                background: currentMood.color,
+                                marginLeft: 8,
+                            }}
+                        />
+                    )}
+                </h2>
+                <p style={{ fontSize: 12, color: "#666" }}>
+                    Room: {ROOMS.find((r) => r.id === joinData.room)?.label}
+                </p>
 
-            <div>
-                {messages.map((msg, index) => (
-                    <p key={index}>
-                        <strong>{msg.studentName}: </strong> {msg.content}
-                    </p>
-                ))}
+                <div>
+                    {messages.map((msg, index) => (
+                        <p key={index}>
+                            <strong>{msg.studentName}: </strong> {msg.content}
+                        </p>
+                    ))}
+                </div>
+
+                <input
+                    type="text"
+                    placeholder="Type a message"
+                    value={messageInput}
+                    onChange={(e) => setMessageInput(e.target.value)}
+                />
+                <button onClick={handleSend}>Send</button>
             </div>
 
-            <input
-                type="text"
-                placeholder="Type a message"
-                value={messageInput}
-                onChange={(e) => setMessageInput(e.target.value)}
-            />
-            <button onClick={handleSend}>Send</button>
+            {/* RIGHT: Who's in this room */}
+            <div style={{ flex: 1, borderLeft: "1px solid #ddd", paddingLeft: 16 }}>
+                <h4>Who's here ({participants.length})</h4>
+                {participants.map((p, index) => {
+                    const pMood = MOODS.find((m) => m.id === p.mood);
+                    return (
+                        <div
+                            key={index}
+                            style={{
+                                marginBottom: 12,
+                                paddingBottom: 8,
+                                borderBottom: "1px solid #eee",
+                            }}
+                        >
+                            <strong>{p.studentName}</strong>
+                            {pMood && (
+                                <span
+                                    title={pMood.label}
+                                    style={{
+                                        display: "inline-block",
+                                        width: 10,
+                                        height: 10,
+                                        borderRadius: "50%",
+                                        background: pMood.color,
+                                        marginLeft: 6,
+                                    }}
+                                />
+                            )}
+                            {p.exam && (
+                                <p style={{ fontSize: 12, margin: "2px 0" }}>📘 {p.exam}</p>
+                            )}
+                            {p.college && (
+                                <p style={{ fontSize: 12, margin: "2px 0" }}>🎓 {p.college}</p>
+                            )}
+                            {p.city && (
+                                <p style={{ fontSize: 12, margin: "2px 0" }}>📍 {p.city}</p>
+                            )}
+                            {p.subject && (
+                                <p style={{ fontSize: 12, margin: "2px 0" }}>
+                                    📖 Studying: {p.subject}
+                                </p>
+                            )}
+                            {p.bio && (
+                                <p style={{ fontSize: 12, margin: "2px 0", fontStyle: "italic" }}>
+                                    "{p.bio}"
+                                </p>
+                            )}
+                            {p.lookingFor && (
+                                <p style={{ fontSize: 12, margin: "2px 0", color: "#3498db" }}>
+                                    🎯 {p.lookingFor}
+                                </p>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 }
