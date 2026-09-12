@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
+import React from "react";
 
 // Admin-defined rooms (hardcoded for now — later can come from backend/admin panel)
 const ROOMS = [
@@ -22,14 +23,6 @@ const LOOKING_FOR_OPTIONS = [
     "Open to doubt-solving",
 ];
 
-const EXAM_OPTIONS = [
-    "BPSC Teacher",
-    "Bihar Police Constable",
-    "Bihar Police Daroga",
-    "Railway RRB",
-    "Other",
-];
-
 function StudyRoom() {
     const [joined, setJoined] = useState(false);
 
@@ -37,7 +30,6 @@ function StudyRoom() {
         name: "",
         mood: "",
         exam: "",
-        examOther: "",
         college: "",
         city: "",
         subject: "",
@@ -47,9 +39,11 @@ function StudyRoom() {
     });
 
     const [messages, setMessages] = useState([]);
-    const [participants, setParticipants] = useState([]); // NEW: who's in the room
+    const [participants, setParticipants] = useState([]);
     const [messageInput, setMessageInput] = useState("");
+    const [uploading, setUploading] = useState(false);
     const stompClientRef = useRef(null);
+    const fileInputRef = useRef(null);
 
     function updateField(field, value) {
         setJoinData((prev) => ({ ...prev, [field]: value }));
@@ -60,10 +54,9 @@ function StudyRoom() {
         setJoined(true);
     }
 
-      useEffect(() => {
+    useEffect(() => {
         if (!joined) return;
 
-        // Fetch current participants BEFORE connecting, so late joiners see who's already here
         fetch(`http://localhost:8080/api/rooms/${joinData.room}/participants`)
             .then((res) => res.json())
             .then((data) => {
@@ -73,15 +66,21 @@ function StudyRoom() {
                 console.error("Failed to fetch participants:", err);
             });
 
-        
+            fetch(`http://localhost:8080/api/rooms/${joinData.room}/messages`)
+            .then((res) => res.json())
+            .then((data) => {
+                setMessages(data);
+            })
+            .catch((err) => {
+                console.error("Failed to fetch message history:", err);
+            });
+
         const stompClient = new Client({
             webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
             reconnectDelay: 5000,
             onConnect: () => {
                 stompClient.subscribe(`/topic/room/${joinData.room}`, (message) => {
                     const received = JSON.parse(message.body);
-
-
 
                     if (received.type === "JOIN") {
                         setParticipants((prev) => {
@@ -96,14 +95,11 @@ function StudyRoom() {
                             prev.filter((p) => p.studentName !== received.studentName)
                         );
                     } else {
+                        // Covers both CHAT and FILE message types
                         setMessages((prev) => [...prev, received]);
                     }
-
-
-
                 });
 
-                // NOW that we're connected, announce ourselves as a JOIN message
                 const joinMessage = {
                     type: "JOIN",
                     studentName: joinData.name,
@@ -148,6 +144,58 @@ function StudyRoom() {
         });
 
         setMessageInput("");
+    }
+
+    function handleAttachClick() {
+        fileInputRef.current.click();
+    }
+
+    async function handleFileChange(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setUploading(true);
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            const res = await fetch(
+                `http://localhost:8080/api/files/upload/${joinData.room}`,
+                {
+                    method: "POST",
+                    body: formData,
+                }
+            );
+
+            if (!res.ok) {
+                const errorData = await res.json();
+                alert(errorData.error || "Upload failed");
+                setUploading(false);
+                return;
+            }
+
+            const data = await res.json();
+
+            const fileMessage = {
+                type: "FILE",
+                studentName: joinData.name,
+                roomId: joinData.room,
+                content: data.fileName,
+                fileUrl: data.downloadUrl,
+            };
+
+            stompClientRef.current.publish({
+                destination: `/app/chat/${joinData.room}`,
+                body: JSON.stringify(fileMessage),
+            });
+        } catch (err) {
+            console.error("Upload error:", err);
+            alert("Upload failed. Please try again.");
+        }
+
+        setUploading(false);
+        e.target.value = "";
     }
 
     const currentMood = MOODS.find((m) => m.id === joinData.mood);
@@ -200,7 +248,6 @@ function StudyRoom() {
                     ))}
                 </div>
 
-
                 <div style={{ marginTop: 10 }}>
                     <input
                         type="text"
@@ -209,7 +256,6 @@ function StudyRoom() {
                         onChange={(e) => updateField("exam", e.target.value)}
                     />
                 </div>
-
 
                 <div style={{ marginTop: 10 }}>
                     <input
@@ -291,13 +337,47 @@ function StudyRoom() {
                 </p>
 
                 <div>
-                    {messages.map((msg, index) => (
-                        <p key={index}>
-                            <strong>{msg.studentName}: </strong> {msg.content}
-                        </p>
-                    ))}
+                    {messages.map((msg, index) => {
+                        if (msg.type === "FILE") {
+                            return (
+                                <p key={index}>
+                                    <strong>{msg.studentName}: </strong>
+                                    shared a file —{" "}
+                                    {React.createElement(
+                                        "a",
+                                        {
+                                        href: `http://localhost:8080${msg.fileUrl}`,
+                                        target: "_blank",
+                                        rel: "noreferrer",
+                                      },
+                                        msg.content
+                                        )}
+                                </p>
+                            );
+                        }
+                        return (
+                            <p key={index}>
+                                <strong>{msg.studentName}: </strong> {msg.content}
+                            </p>
+                        );
+                    })}
                 </div>
 
+                <input
+                    type="file"
+                    ref={fileInputRef}
+                    style={{ display: "none" }}
+                    accept="image/png,image/jpeg,application/pdf"
+                    onChange={handleFileChange}
+                />
+                <button
+                    onClick={handleAttachClick}
+                    disabled={uploading}
+                    style={{ marginRight: 6 }}
+                    title="Attach image or PDF"
+                >
+                    📎
+                </button>
                 <input
                     type="text"
                     placeholder="Type a message"
@@ -305,6 +385,7 @@ function StudyRoom() {
                     onChange={(e) => setMessageInput(e.target.value)}
                 />
                 <button onClick={handleSend}>Send</button>
+                {uploading && <p style={{ fontSize: 12, color: "#888" }}>Uploading...</p>}
             </div>
 
             {/* RIGHT: Who's in this room */}
