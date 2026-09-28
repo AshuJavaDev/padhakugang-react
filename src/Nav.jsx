@@ -8,9 +8,11 @@ function Nav() {
         <nav>
             <Link to ="/">Home</Link>
             <Link to="/notes">Notes</Link>
+            <Link to="/tribute">Tribute</Link>
             <span>-Logged in as: {nickname} </span>
         </nav> 
     )
 }
 
 export default Nav
+

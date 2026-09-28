@@ -69,7 +69,7 @@ function StudyRoom() {
             fetch(`http://localhost:8080/api/rooms/${joinData.room}/messages`)
             .then((res) => res.json())
             .then((data) => {
-                setMessages(data);
+                setMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE"));
             })
             .catch((err) => {
                 console.error("Failed to fetch message history:", err);
@@ -94,8 +94,18 @@ function StudyRoom() {
                         setParticipants((prev) =>
                             prev.filter((p) => p.studentName !== received.studentName)
                         );
-                    } else {
-                        // Covers both CHAT and FILE message types
+                    } else if(received.type === "MUTE_NOTICE") {
+                            if(received.studentName === joinData.name) {
+                                alert(received.content);
+                            }
+                    } else if(received.type === "KICK") {
+                        if(received.studentName === joinData.name) {
+                            alert("You have been removed from this room by a moderator.");
+                            setMessages([]);
+                            setParticipants([]);
+                            setJoined(false);
+                        }
+                    } else if(received.type === "CHAT" || received.type === "FILE") {
                         setMessages((prev) => [...prev, received]);
                     }
                 });
