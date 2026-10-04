@@ -42,6 +42,10 @@ function StudyRoom() {
     const [participants, setParticipants] = useState([]);
     const [messageInput, setMessageInput] = useState("");
     const [uploading, setUploading] = useState(false);
+    const [questionText, setQuestionText] = useState("");
+    const [questionPrivate, setQuestionPrivate] = useState(false);
+    const [askingMentor, setAskingMentor] = useState(false);
+    const [myQuestion, setMyQuestion] = useState(null);
     const stompClientRef = useRef(null);
     const fileInputRef = useRef(null);
 
@@ -208,6 +212,44 @@ function StudyRoom() {
         e.target.value = "";
     }
 
+        async function handleAskMentor() {
+        if (!questionText.trim()) return;
+
+        setAskingMentor(true);
+
+        try {
+            const res = await fetch(
+                `http://localhost:8080/api/rooms/${joinData.room}/questions`,
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        studentName: joinData.name,
+                        questionText: questionText,
+                        privateQuestion: questionPrivate,
+                    }),
+                }
+            );
+
+            if (!res.ok) {
+                const errorText = await res.text();   // backend sends plain text on errors
+                alert(errorText || "Could not send your question.");
+                setAskingMentor(false);
+                return;
+            }
+
+            const data = await res.json();
+            setMyQuestion(data);          // saved question, includes statusCode
+            setQuestionText("");
+            setQuestionPrivate(false);
+        } catch (err) {
+            console.error("Ask mentor error:", err);
+            alert("Could not send your question. Please try again.");
+        }
+
+        setAskingMentor(false);
+    }
+
     const currentMood = MOODS.find((m) => m.id === joinData.mood);
 
     if (!joined) {
@@ -315,6 +357,29 @@ function StudyRoom() {
                     </select>
                 </div>
 
+                        {import.meta.env.DEV && (
+                    <div style={{ marginTop: 16 }}>
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setJoinData({
+                                    name: "Tester" + Math.floor(Math.random() * 100),
+                                    mood: "awesome",
+                                    exam: "Bihar Daroga",
+                                    college: "Test College",
+                                    city: "Dhanbad, Jharkhand",
+                                    subject: "Reasoning",
+                                    bio: "Just testing PadhakuGang",
+                                    lookingFor: "Just here to focus",
+                                    room: "bihar-police",
+                                })
+                            }
+                        >
+                            ⚡ Fill test data (dev only)
+                        </button>
+                    </div>
+                )}
+
                 <div style={{ marginTop: 16 }}>
                     <button onClick={handleJoin}>Join</button>
                 </div>
@@ -322,6 +387,7 @@ function StudyRoom() {
         );
     }
 
+    
     return (
         <div style={{ display: "flex", maxWidth: 700, margin: "0 auto", gap: 20 }}>
             {/* LEFT: Chat */}
@@ -396,6 +462,43 @@ function StudyRoom() {
                 />
                 <button onClick={handleSend}>Send</button>
                 {uploading && <p style={{ fontSize: 12, color: "#888" }}>Uploading...</p>}
+            
+
+                <div style={{ marginTop: 20, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
+                    <h4 style={{ margin: "0 0 8px" }}>🎓 Ask a Mentor</h4>
+                    <textarea
+                        rows={3}
+                        style={{ width: "100%" }}
+                        placeholder="Type your question for this room's mentors..."
+                        value={questionText}
+                        maxLength={1000}
+                        onChange={(e) => setQuestionText(e.target.value)}
+                    />
+                    <label style={{ fontSize: 12, display: "block", margin: "6px 0" }}>
+                        <input
+                            type="checkbox"
+                            checked={questionPrivate}
+                            onChange={(e) => setQuestionPrivate(e.target.checked)}
+                        />{" "}
+                        Keep my question private (only I can see the answer, using my code)
+                    </label>
+                    <button onClick={handleAskMentor} disabled={askingMentor}>
+                        {askingMentor ? "Sending..." : "Ask Mentor"}
+                    </button>
+
+                    {myQuestion && (
+                        <div style={{ marginTop: 10, padding: 10, background: "#eef6ff", borderRadius: 6 }}>
+                            <p style={{ margin: 0 }}>✅ Question sent!</p>
+                            <p style={{ margin: "4px 0", fontSize: 18 }}>
+                                <strong>Your code: {myQuestion.statusCode}</strong>
+                            </p>
+                            <p style={{ margin: 0, fontSize: 12, color: "#555" }}>
+                                Save this code. Mentors usually reply within 24 hours
+                                {myQuestion.privateQuestion ? "." : ", and the answer will also appear in this room."}
+                            </p>
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* RIGHT: Who's in this room */}
