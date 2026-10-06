@@ -46,6 +46,7 @@ function StudyRoom() {
     const [questionPrivate, setQuestionPrivate] = useState(false);
     const [askingMentor, setAskingMentor] = useState(false);
     const [myQuestion, setMyQuestion] = useState(null);
+    const [copied, setCopied] = useState(false);
     const stompClientRef = useRef(null);
     const fileInputRef = useRef(null);
 
@@ -240,6 +241,7 @@ function StudyRoom() {
 
             const data = await res.json();
             setMyQuestion(data);          // saved question, includes statusCode
+            downloadSlip(data);           // slip downloads automatically
             setQuestionText("");
             setQuestionPrivate(false);
         } catch (err) {
@@ -248,6 +250,105 @@ function StudyRoom() {
         }
 
         setAskingMentor(false);
+    }
+
+       function downloadSlip(question) {
+        const canvas = document.createElement("canvas");
+        canvas.width = 600;
+        canvas.height = 370;                      // CHANGED: 340 -> 370
+        const ctx = canvas.getContext("2d");
+
+        // white background
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, 600, 370);             // CHANGED: 340 -> 370
+
+        // navy top band with brand name
+        ctx.fillStyle = "#0B1F3A";
+        ctx.fillRect(0, 0, 600, 70);
+              ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 28px Arial";
+        ctx.fillText("PadhakuGang", 24, 38);              // moved up a little: 45 -> 38
+
+              // tagline under the brand name
+        ctx.font = "italic 13px Arial";
+        ctx.fillText("Study. Connect. Grow.", 24, 58);
+
+        ctx.font = "16px Arial";
+        ctx.fillText("Ask a Mentor", 450, 45);
+
+        // the code, big and blue
+        ctx.fillStyle = "#555555";
+        ctx.font = "16px Arial";
+        ctx.fillText("Your code", 24, 110);
+        ctx.fillStyle = "#1F7AE0";
+        ctx.font = "bold 44px Arial";
+        ctx.fillText(question.statusCode, 24, 160);
+
+        // details
+        const roomLabel = ROOMS.find((r) => r.id === question.roomId)?.label || question.roomId;
+
+        // question in one clean line
+        const fullText = (question.questionText || "").replace(/\s+/g, " ").trim();
+
+        // CHANGED: friendlier date -> "6 Oct 2026, 1:07 pm"
+        const created = new Date(question.createdAt).toLocaleString("en-IN", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+        });
+
+        ctx.fillStyle = "#333333";
+        ctx.font = "16px Arial";
+        ctx.fillText("Code for: Ask a Mentor question (" + roomLabel + ")", 24, 200);
+               // fit the question inside the slip width (600 - 24 - 24 = 552px)
+        let questionLine = "Question: " + fullText;
+        if (ctx.measureText(questionLine).width > 552) {
+            while (ctx.measureText(questionLine + "...").width > 552) {
+                questionLine = questionLine.slice(0, -1);   // cut one character from the end
+            }
+            questionLine = questionLine.trimEnd() + "...";
+        }
+        ctx.fillText(questionLine, 24, 228);                             // NEW line
+        ctx.fillText("Created on: " + created, 24, 256);                            // y: 228 -> 256
+        ctx.fillText("Mentors usually reply within 24 hours.", 24, 284);            // y: 256 -> 284
+               // website in brand blue, so it stands out
+        const checkStart = "Check your answer: ";
+        ctx.fillText(checkStart, 24, 312);
+        const checkStartWidth = ctx.measureText(checkStart).width;
+        ctx.fillStyle = "#1F7AE0";
+        ctx.font = "bold 16px Arial";
+        ctx.fillText("www.padhakugang.com", 24 + checkStartWidth, 312);
+        const siteWidth = ctx.measureText("www.padhakugang.com").width;
+        ctx.fillStyle = "#333333";
+        ctx.font = "16px Arial";
+        ctx.fillText(" > Check your code", 24 + checkStartWidth + siteWidth, 312); // y: 284 -> 312
+        ctx.fillStyle = "#888888";
+        ctx.font = "13px Arial";
+        ctx.fillText(
+            question.privateQuestion
+                ? "Private question: only this code shows the answer."
+                : "Public question: the answer will also appear in the room.",
+            24, 346                                                                 // y: 318 -> 346
+        );
+
+        // turn the board into a PNG and download it
+        const link = document.createElement("a");
+        link.href = canvas.toDataURL("image/png");
+        link.download = "PadhakuGang-" + question.statusCode + ".png";
+        link.click();
+    }
+
+    async function handleCopyCode() {
+        try {
+            await navigator.clipboard.writeText(myQuestion.statusCode);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            alert("Could not copy. Please note your code: " + myQuestion.statusCode);
+        }
     }
 
     const currentMood = MOODS.find((m) => m.id === joinData.mood);
@@ -495,8 +596,18 @@ function StudyRoom() {
                             <p style={{ margin: 0, fontSize: 12, color: "#555" }}>
                                 Save this code. Mentors usually reply within 24 hours
                                 {myQuestion.privateQuestion ? "." : ", and the answer will also appear in this room."}
-                            </p>
-                        </div>
+                               </p>
+                                <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                                <button onClick={() => downloadSlip(myQuestion)}>⬇️ Download again</button>
+                                <button onClick={handleCopyCode}>{copied ? "✅ Copied!" : "📋 Copy code"}</button>
+                                {React.createElement(
+                                    "a",
+                                    { href: `/check?code=${myQuestion.statusCode}`, target: "_blank", rel: "noreferrer" },
+                                    "🔑 Check your answer →"
+                                )}
+                            </div>
+                           </div>
+                           
                     )}
                 </div>
             </div>
