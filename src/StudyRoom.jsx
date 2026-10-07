@@ -110,7 +110,7 @@ function StudyRoom() {
                             setParticipants([]);
                             setJoined(false);
                         }
-                    } else if(received.type === "CHAT" || received.type === "FILE") {
+                    } else if(received.type === "CHAT" || received.type === "FILE" || received.type === "MENTOR_ANSWER") {
                         setMessages((prev) => [...prev, received]);
                     }
                 });
@@ -515,6 +515,26 @@ function StudyRoom() {
 
                 <div>
                     {messages.map((msg, index) => {
+                                                if (msg.type === "MENTOR_ANSWER") {
+                            return (
+                                <div
+                                    key={index}
+                                    style={{
+                                        margin: "10px 0",
+                                        padding: 10,
+                                        background: "#eef6ff",
+                                        borderLeft: "4px solid #1F7AE0",
+                                        borderRadius: 6,
+                                        textAlign: "left",
+                                    }}
+                                >
+                                    <strong>🎓 Mentor · {msg.studentName}</strong>
+                                    <p style={{ margin: "6px 0 0", whiteSpace: "pre-line" }}>
+                                        {msg.content}
+                                    </p>
+                                </div>
+                            );
+                        }
                         if (msg.type === "FILE") {
                             return (
                                 <p key={index}>
