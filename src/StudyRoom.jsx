@@ -47,6 +47,12 @@ function StudyRoom() {
     const [askingMentor, setAskingMentor] = useState(false);
     const [myQuestion, setMyQuestion] = useState(null);
     const [copied, setCopied] = useState(false);
+    const [activeTab, setActiveTab] = useState("chat");
+    const [mentorAnswers, setMentorAnswers] = useState([]);
+    const [answersPage, setAnswersPage] = useState(0);
+    const [hasOlderAnswers, setHasOlderAnswers] = useState(false);
+    const [unreadAnswers, setUnreadAnswers] = useState(0);
+    const [connected, setConnected] = useState(false);
     const stompClientRef = useRef(null);
     const fileInputRef = useRef(null);
 
@@ -59,9 +65,28 @@ function StudyRoom() {
         setJoined(true);
     }
 
-    useEffect(() => {
-        if (!joined) return;
+        function loadAnswers(page) {
+        fetch(`http://localhost:8080/api/rooms/${joinData.room}/answers?page=${page}`)
+            .then((res) => res.json())
+            .then((data) => {
+                // page 0 = fresh list, later pages = add below the old ones
+                setMentorAnswers((prev) => (page === 0 ? data : [...prev, ...data]));
+                setAnswersPage(page);
+                setHasOlderAnswers(data.length === 20);   // a full page means there may be more
+            })
+            .catch((err) => {
+                console.error("Failed to fetch mentor answers:", err);
+            });
+    }
 
+    function switchTab(tab) {
+        if (tab === "mentor" || activeTab === "mentor") {
+            setUnreadAnswers(0);
+        }
+        setActiveTab(tab);
+    }
+
+        function loadRoomData() {
         fetch(`http://localhost:8080/api/rooms/${joinData.room}/participants`)
             .then((res) => res.json())
             .then((data) => {
@@ -71,7 +96,7 @@ function StudyRoom() {
                 console.error("Failed to fetch participants:", err);
             });
 
-            fetch(`http://localhost:8080/api/rooms/${joinData.room}/messages`)
+        fetch(`http://localhost:8080/api/rooms/${joinData.room}/messages`)
             .then((res) => res.json())
             .then((data) => {
                 setMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE"));
@@ -80,10 +105,21 @@ function StudyRoom() {
                 console.error("Failed to fetch message history:", err);
             });
 
+        loadAnswers(0);
+    }
+
+    useEffect(() => {
+        if (!joined) return;
+
+           
+       
+
         const stompClient = new Client({
             webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
             reconnectDelay: 5000,
+            onWebSocketClose: () => setConnected(false),
             onConnect: () => {
+                setConnected(true);
                 stompClient.subscribe(`/topic/room/${joinData.room}`, (message) => {
                     const received = JSON.parse(message.body);
 
@@ -110,7 +146,10 @@ function StudyRoom() {
                             setParticipants([]);
                             setJoined(false);
                         }
-                    } else if(received.type === "CHAT" || received.type === "FILE" || received.type === "MENTOR_ANSWER") {
+                    } else if(received.type === "MENTOR_ANSWER") {
+                        loadAnswers(0);                       // refresh the Mentor tab list
+                        setUnreadAnswers((n) => n + 1);       // red dot on the tab
+                    } else if(received.type === "CHAT" || received.type === "FILE") {
                         setMessages((prev) => [...prev, received]);
                     }
                 });
@@ -132,6 +171,7 @@ function StudyRoom() {
                     destination: `/app/chat/${joinData.room}`,
                     body: JSON.stringify(joinMessage),
                 });
+                                loadRoomData();   // runs on first connect AND on every reconnect
             },
         });
 
@@ -492,6 +532,7 @@ function StudyRoom() {
     return (
         <div style={{ display: "flex", maxWidth: 700, margin: "0 auto", gap: 20 }}>
             {/* LEFT: Chat */}
+                      {/* LEFT: tabs */}
             <div style={{ flex: 2 }}>
                 <h2>
                     Welcome, {joinData.name}!
@@ -509,127 +550,222 @@ function StudyRoom() {
                         />
                     )}
                 </h2>
-                <p style={{ fontSize: 12, color: "#666" }}>
+                    
+                    <p style={{ fontSize: 12, color: "#666" }}>
                     Room: {ROOMS.find((r) => r.id === joinData.room)?.label}
+                    {" · "}
+                    <span style={{ color: connected ? "#2ecc71" : "#e74c3c", fontWeight: "bold" }}>
+                        {connected ? "● Connected" : "● Reconnecting..."}
+                    </span>
                 </p>
 
-                <div>
-                    {messages.map((msg, index) => {
-                                                if (msg.type === "MENTOR_ANSWER") {
-                            return (
-                                <div
-                                    key={index}
+
+                {import.meta.env.DEV && (
+                    <button
+                        type="button"
+                        onClick={() => stompClientRef.current.forceDisconnect()}
+                        style={{ fontSize: 11, marginBottom: 8 }}
+                    >
+                        🔌 Drop my connection (dev only)
+                    </button>
+                )}
+
+
+                {/* tab buttons */}
+                <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                    {[
+                        { id: "chat", label: "💬 Chat" },
+                        { id: "mentor", label: "🎓 Mentor" },
+                        { id: "files", label: "📁 Files" },
+                    ].map((tab) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => switchTab(tab.id)}
+                            style={{
+                                flex: 1,
+                                padding: "8px 4px",
+                                border: "none",
+                                borderBottom:
+                                    activeTab === tab.id ? "3px solid #1F7AE0" : "3px solid #ddd",
+                                background: "transparent",
+                                fontWeight: activeTab === tab.id ? "bold" : "normal",
+                                cursor: "pointer",
+                            }}
+                        >
+                            {tab.label}
+                            {tab.id === "mentor" && unreadAnswers > 0 && activeTab !== "mentor" && (
+                                <span
                                     style={{
-                                        margin: "10px 0",
-                                        padding: 10,
-                                        background: "#eef6ff",
-                                        borderLeft: "4px solid #1F7AE0",
-                                        borderRadius: 6,
-                                        textAlign: "left",
+                                        marginLeft: 6,
+                                        background: "#e74c3c",
+                                        color: "white",
+                                        borderRadius: 10,
+                                        padding: "1px 7px",
+                                        fontSize: 11,
                                     }}
                                 >
-                                    <strong>🎓 Mentor · {msg.studentName}</strong>
-                                    <p style={{ margin: "6px 0 0", whiteSpace: "pre-line" }}>
-                                        {msg.content}
+                                    {unreadAnswers}
+                                </span>
+                            )}
+                        </button>
+                    ))}
+                </div>
+
+                {/* TAB 1: chat */}
+                {activeTab === "chat" && (
+                    <div>
+                        <div>
+                            {messages.map((msg, index) => {
+                                if (msg.type === "FILE") {
+                                    return (
+                                        <p key={index}>
+                                            <strong>{msg.studentName}: </strong>
+                                            shared a file —{" "}
+                                            {React.createElement(
+                                                "a",
+                                                {
+                                                    href: `http://localhost:8080${msg.fileUrl}`,
+                                                    target: "_blank",
+                                                    rel: "noreferrer",
+                                                },
+                                                msg.content
+                                            )}
+                                        </p>
+                                    );
+                                }
+                                return (
+                                    <p key={index}>
+                                        <strong>{msg.studentName}: </strong> {msg.content}
                                     </p>
-                                </div>
-                            );
-                        }
-                        if (msg.type === "FILE") {
-                            return (
-                                <p key={index}>
-                                    <strong>{msg.studentName}: </strong>
-                                    shared a file —{" "}
-                                    {React.createElement(
-                                        "a",
-                                        {
-                                        href: `http://localhost:8080${msg.fileUrl}`,
-                                        target: "_blank",
-                                        rel: "noreferrer",
-                                      },
-                                        msg.content
-                                        )}
-                                </p>
-                            );
-                        }
-                        return (
-                            <p key={index}>
-                                <strong>{msg.studentName}: </strong> {msg.content}
-                            </p>
-                        );
-                    })}
-                </div>
+                                );
+                            })}
+                        </div>
 
-                <input
-                    type="file"
-                    ref={fileInputRef}
-                    style={{ display: "none" }}
-                    accept="image/png,image/jpeg,application/pdf"
-                    onChange={handleFileChange}
-                />
-                <button
-                    onClick={handleAttachClick}
-                    disabled={uploading}
-                    style={{ marginRight: 6 }}
-                    title="Attach image or PDF"
-                >
-                    📎
-                </button>
-                <input
-                    type="text"
-                    placeholder="Type a message"
-                    value={messageInput}
-                    onChange={(e) => setMessageInput(e.target.value)}
-                />
-                <button onClick={handleSend}>Send</button>
-                {uploading && <p style={{ fontSize: 12, color: "#888" }}>Uploading...</p>}
-            
-
-                <div style={{ marginTop: 20, padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
-                    <h4 style={{ margin: "0 0 8px" }}>🎓 Ask a Mentor</h4>
-                    <textarea
-                        rows={3}
-                        style={{ width: "100%" }}
-                        placeholder="Type your question for this room's mentors..."
-                        value={questionText}
-                        maxLength={1000}
-                        onChange={(e) => setQuestionText(e.target.value)}
-                    />
-                    <label style={{ fontSize: 12, display: "block", margin: "6px 0" }}>
                         <input
-                            type="checkbox"
-                            checked={questionPrivate}
-                            onChange={(e) => setQuestionPrivate(e.target.checked)}
-                        />{" "}
-                        Keep my question private (only I can see the answer, using my code)
-                    </label>
-                    <button onClick={handleAskMentor} disabled={askingMentor}>
-                        {askingMentor ? "Sending..." : "Ask Mentor"}
-                    </button>
+                            type="file"
+                            ref={fileInputRef}
+                            style={{ display: "none" }}
+                            accept="image/png,image/jpeg,application/pdf"
+                            onChange={handleFileChange}
+                        />
+                        <button
+                            onClick={handleAttachClick}
+                            disabled={uploading}
+                            style={{ marginRight: 6 }}
+                            title="Attach image or PDF"
+                        >
+                            📎
+                        </button>
+                        <input
+                            type="text"
+                            placeholder="Type a message"
+                            value={messageInput}
+                            onChange={(e) => setMessageInput(e.target.value)}
+                        />
+                        <button onClick={handleSend}>Send</button>
+                        {uploading && <p style={{ fontSize: 12, color: "#888" }}>Uploading...</p>}
+                    </div>
+                )}
 
-                    {myQuestion && (
-                        <div style={{ marginTop: 10, padding: 10, background: "#eef6ff", borderRadius: 6 }}>
-                            <p style={{ margin: 0 }}>✅ Question sent!</p>
-                            <p style={{ margin: "4px 0", fontSize: 18 }}>
-                                <strong>Your code: {myQuestion.statusCode}</strong>
+                {/* TAB 2: mentor */}
+                {activeTab === "mentor" && (
+                    <div>
+                        <div style={{ padding: 12, border: "1px solid #ddd", borderRadius: 8 }}>
+                            <h4 style={{ margin: "0 0 8px" }}>🎓 Ask a Mentor</h4>
+                            <textarea
+                                rows={3}
+                                style={{ width: "100%" }}
+                                placeholder="Type your question for this room's mentors..."
+                                value={questionText}
+                                maxLength={1000}
+                                onChange={(e) => setQuestionText(e.target.value)}
+                            />
+                            <label style={{ fontSize: 12, display: "block", margin: "6px 0" }}>
+                                <input
+                                    type="checkbox"
+                                    checked={questionPrivate}
+                                    onChange={(e) => setQuestionPrivate(e.target.checked)}
+                                />{" "}
+                                Keep my question private (only I can see the answer, using my code)
+                            </label>
+                            <button onClick={handleAskMentor} disabled={askingMentor}>
+                                {askingMentor ? "Sending..." : "Ask Mentor"}
+                            </button>
+
+                            {myQuestion && (
+                                <div style={{ marginTop: 10, padding: 10, background: "#eef6ff", borderRadius: 6 }}>
+                                    <p style={{ margin: 0 }}>✅ Question sent!</p>
+                                    <p style={{ margin: "4px 0", fontSize: 18 }}>
+                                        <strong>Your code: {myQuestion.statusCode}</strong>
+                                    </p>
+                                    <p style={{ margin: 0, fontSize: 12, color: "#555" }}>
+                                        Save this code. Mentors usually reply within 24 hours
+                                        {myQuestion.privateQuestion ? "." : ", and the answer will also appear in this tab."}
+                                    </p>
+                                    <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                                        <button onClick={() => downloadSlip(myQuestion)}>⬇️ Download again</button>
+                                        <button onClick={handleCopyCode}>{copied ? "✅ Copied!" : "📋 Copy code"}</button>
+                                        {React.createElement(
+                                            "a",
+                                            { href: `/check?code=${myQuestion.statusCode}`, target: "_blank", rel: "noreferrer" },
+                                            "🔑 Check your answer →"
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <h4 style={{ margin: "16px 0 8px" }}>Mentor answers</h4>
+                        {mentorAnswers.length === 0 && (
+                            <p style={{ fontSize: 13, color: "#888" }}>
+                                No answers yet. Ask the first question!
                             </p>
-                            <p style={{ margin: 0, fontSize: 12, color: "#555" }}>
-                                Save this code. Mentors usually reply within 24 hours
-                                {myQuestion.privateQuestion ? "." : ", and the answer will also appear in this room."}
-                               </p>
-                                <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-                                <button onClick={() => downloadSlip(myQuestion)}>⬇️ Download again</button>
-                                <button onClick={handleCopyCode}>{copied ? "✅ Copied!" : "📋 Copy code"}</button>
-                                {React.createElement(
-                                    "a",
-                                    { href: `/check?code=${myQuestion.statusCode}`, target: "_blank", rel: "noreferrer" },
-                                    "🔑 Check your answer →"
-                                )}
+                        )}
+                        {mentorAnswers.map((a, index) => (
+                            <div
+                                key={index}
+                                style={{
+                                    margin: "10px 0",
+                                    padding: 10,
+                                    background: "#eef6ff",
+                                    borderLeft: "4px solid #1F7AE0",
+                                    borderRadius: 6,
+                                    textAlign: "left",
+                                }}
+                            >
+                                <strong>🎓 Mentor · {a.answeredBy}</strong>
+                                <p style={{ margin: "6px 0 0" }}>
+                                    <strong>Q ({a.studentName}):</strong> {a.question}
+                                </p>
+                                <p style={{ margin: "4px 0 0", whiteSpace: "pre-line" }}>
+                                    <strong>A:</strong> {a.answer}
+                                </p>
+                                <p style={{ margin: "4px 0 0", fontSize: 11, color: "#888" }}>
+                                    {new Date(a.answeredAt).toLocaleString("en-IN", {
+                                        day: "numeric",
+                                        month: "short",
+                                        year: "numeric",
+                                        hour: "numeric",
+                                        minute: "2-digit",
+                                        hour12: true,
+                                    })}
+                                </p>
                             </div>
-                           </div>
-                           
-                    )}
-                </div>
+                        ))}
+                        {hasOlderAnswers && (
+                            <button onClick={() => loadAnswers(answersPage + 1)}>
+                                Show older answers
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {/* TAB 3: files */}
+                {activeTab === "files" && (
+                    <p style={{ fontSize: 13, color: "#888" }}>
+                        📁 Files shared in this room will be listed here. Coming soon.
+                    </p>
+                )}
             </div>
 
             {/* RIGHT: Who's in this room */}
