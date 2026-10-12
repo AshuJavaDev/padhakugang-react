@@ -5,6 +5,7 @@ import { UserContext } from './UserContext.jsx'
 import Nav from './Nav.jsx'
 import StudyRoom from './StudyRoom.jsx'
 import TributeSection from './TributeSection.jsx'
+import CheckCode from './CheckCode.jsx'
 
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
         <Route path = "/notes" element = {<Notes />} />
         <Route path = "/studyroom" element = {<StudyRoom />} />
         <Route path = "/tribute" element = {<TributeSection />} />
+        <Route path = "/check" element = {<CheckCode />} />
       </Routes>
     </div>
     </UserContext.Provider>
