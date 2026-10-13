@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import React from "react";
+import { saveCode } from "./savedCodes";
 
 // Admin-defined rooms (hardcoded for now — later can come from backend/admin panel)
 const ROOMS = [
@@ -281,6 +282,7 @@ function StudyRoom() {
 
             const data = await res.json();
             setMyQuestion(data);          // saved question, includes statusCode
+            saveCode(data.statusCode, data.questionText);   // remember on this device right away
             downloadSlip(data);           // slip downloads automatically
             setQuestionText("");
             setQuestionPrivate(false);

@@ -1,6 +1,7 @@
 
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { readSavedCodes, saveCode } from "./savedCodes";
 
 const PENDING_MSG =
     "⏳ Your question has reached our mentors. They usually reply within 24 hours, so please check back a little later. Your question is safe with us!";
@@ -19,13 +20,7 @@ function formatDate(value) {
     });
 }
 
-function readSavedCodes() {
-    try {
-        return JSON.parse(localStorage.getItem("pg_codes")) || [];
-    } catch {
-        return [];
-    }
-}
+
 
 function CheckCode() {
     const [searchParams] = useSearchParams();
@@ -35,14 +30,8 @@ function CheckCode() {
     const [loading, setLoading] = useState(false);
     const [savedCodes, setSavedCodes] = useState(readSavedCodes);
 
-    function rememberCode(c) {
-        const updated = [c, ...savedCodes.filter((x) => x !== c)].slice(0, 10);   // newest first, max 10
-        setSavedCodes(updated);
-        try {
-            localStorage.setItem("pg_codes", JSON.stringify(updated));
-        } catch {
-            // storage blocked (private window etc.) - the page still works, just won't remember
-        }
+      function rememberCode(c, questionText) {
+        setSavedCodes(saveCode(c, questionText));
     }
 
     async function checkCode(input) {
@@ -64,7 +53,7 @@ function CheckCode() {
             } else {
                 const data = await res.json();
                 setResult(data);
-                rememberCode(data.code);
+                rememberCode(data.code, data.question);
             }
         } catch (err) {
             console.error("Code lookup failed:", err);
@@ -110,12 +99,13 @@ function CheckCode() {
                     <span style={{ color: "#888" }}>Your codes on this device: </span>
                     {savedCodes.map((c) => (
                         <button
-                            key={c}
+                            key={c.code}
                             type="button"
-                            onClick={() => checkCode(c)}
+                            onClick={() => checkCode(c.code)}
                             style={{ margin: "4px", fontSize: 12 }}
                         >
-                            {c}
+                            {c.code}
+                            {c.preview && ` · ${c.preview}`}
                         </button>
                     ))}
                 </div>
