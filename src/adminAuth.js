@@ -37,5 +37,46 @@ export function readAdminSession()  {
         return session;
     }   catch (e)  {
         return null;
+    } }
+
+    const API = "http://localhost:8080";
+
+// fetch for admin pages: adds the token automatically.
+// Returns { ok, status, data }, or { expired: true } when the session is no longer valid.
+export async function adminFetch(path, options = {}) {
+    const session = readAdminSession();
+    if (!session) return { expired: true };   // missing or expired on this device
+
+    let res;
+    try {
+        res = await fetch(API + path, {
+            ...options,
+            headers: {
+                ...(options.headers || {}),
+                Authorization: "Bearer " + session.token,
+            },
+        });
+    } catch (e) {
+        // backend down / no internet -> fetch throws instead of returning a response
+        return { ok: false, status: 0, data: "Cannot reach the server. Is the backend running?" };
     }
-}
+
+    const text = await res.text();
+
+    // Spring Security's own rejections (bad/expired token, disabled account) come with an EMPTY body.
+    // Our controllers' "not allowed" errors always carry a message, so they are NOT treated as expiry.
+    if (res.status === 401 || (res.status === 403 && !text)) {
+        clearAdminSession();
+        return { expired: true };
+    }
+
+    let data = text;
+    try {
+        data = JSON.parse(text);    // JSON lists/objects
+    } catch (e) {
+        // plain-text message, e.g. "You have already answered this question."
+    }
+    return { ok: res.ok, status: res.status, data };
+    }
+
+

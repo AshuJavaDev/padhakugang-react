@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { useNavigate, Navigate } from "react-router-dom";
 import { saveAdminSession, readAdminSession } from "./adminAuth.js";
+import { useNavigate, Navigate, useLocation } from "react-router-dom";
+
 
 const API = "http://localhost:8080";
 
 function AdminLogin() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -71,6 +73,9 @@ function AdminLogin() {
           />
         </div>
         {error && <p style={{ color: "red" }}>{error}</p>}
+        {location.state?.expired && !error && (
+        <p style={{ color: "#b26a00" }}>Your session has expired, please log in again.</p>
+        )}
         <button type="submit" disabled={loading}>
           {loading ? "Logging in..." : "Login"}
         </button>

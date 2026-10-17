@@ -3,13 +3,9 @@ import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import React from "react";
 import { saveCode } from "./savedCodes";
+import { ROOMS } from "./rooms";
 
-// Admin-defined rooms (hardcoded for now — later can come from backend/admin panel)
-const ROOMS = [
-    { id: "bpsc-teacher", label: "BPSC Teacher Prep" },
-    { id: "bihar-police", label: "Bihar Police / Daroga" },
-    { id: "railway-rrb", label: "Railway RRB" },
-];
+
 
 const MOODS = [
     { id: "awesome", label: "Awesome", color: "#2ecc71" },
@@ -18,11 +14,13 @@ const MOODS = [
     { id: "very-sad", label: "Very sad", color: "#e74c3c" },
 ];
 
+
 const LOOKING_FOR_OPTIONS = [
     "Just here to focus",
     "Need a study partner",
     "Open to doubt-solving",
 ];
+
 
 function StudyRoom() {
     const [joined, setJoined] = useState(false);
@@ -533,7 +531,7 @@ function StudyRoom() {
     
     return (
         <div style={{ display: "flex", maxWidth: 700, margin: "0 auto", gap: 20 }}>
-            {/* LEFT: Chat */}
+          
                       {/* LEFT: tabs */}
             <div style={{ flex: 2 }}>
                 <h2>
