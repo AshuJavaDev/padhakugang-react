@@ -392,6 +392,20 @@ function StudyRoom() {
     }
 
     const currentMood = MOODS.find((m) => m.id === joinData.mood);
+        // Group answer rows of the same question (original + copies) into one card
+    const answerGroups = [];
+    const groupIndex = {};
+    mentorAnswers.forEach((a) => {
+        if (groupIndex[a.groupId] === undefined) {
+            groupIndex[a.groupId] = answerGroups.length;
+            answerGroups.push({ key: a.groupId, studentName: a.studentName, question: a.question, answers: [] });
+        }
+        answerGroups[groupIndex[a.groupId]].answers.push(a);
+    });
+    // inside each card: oldest answer first
+    answerGroups.forEach((g) =>
+        g.answers.sort((x, y) => new Date(x.answeredAt) - new Date(y.answeredAt))
+    );
 
     if (!joined) {
         return (
@@ -721,9 +735,11 @@ function StudyRoom() {
                                 No answers yet. Ask the first question!
                             </p>
                         )}
-                        {mentorAnswers.map((a, index) => (
+
+
+                                                {answerGroups.map((g) => (
                             <div
-                                key={index}
+                                key={g.key}
                                 style={{
                                     margin: "10px 0",
                                     padding: 10,
@@ -733,25 +749,32 @@ function StudyRoom() {
                                     textAlign: "left",
                                 }}
                             >
-                                <strong>🎓 Mentor · {a.answeredBy}</strong>
-                                <p style={{ margin: "6px 0 0" }}>
-                                    <strong>Q ({a.studentName}):</strong> {a.question}
+                                <p style={{ margin: 0 }}>
+                                    <strong>Q ({g.studentName}):</strong> {g.question}
                                 </p>
-                                <p style={{ margin: "4px 0 0", whiteSpace: "pre-line" }}>
-                                    <strong>A:</strong> {a.answer}
-                                </p>
-                                <p style={{ margin: "4px 0 0", fontSize: 11, color: "#888" }}>
-                                    {new Date(a.answeredAt).toLocaleString("en-IN", {
-                                        day: "numeric",
-                                        month: "short",
-                                        year: "numeric",
-                                        hour: "numeric",
-                                        minute: "2-digit",
-                                        hour12: true,
-                                    })}
-                                </p>
+                                {g.answers.map((a, i) => (
+                                    <div
+                                        key={i}
+                                        style={{ marginTop: 8, padding: 8, background: "#ffffff", borderRadius: 6 }}
+                                    >
+                                        <strong>🎓 Mentor · {a.answeredBy}</strong>
+                                        <p style={{ margin: "4px 0 0", whiteSpace: "pre-line" }}>{a.answer}</p>
+                                        <p style={{ margin: "4px 0 0", fontSize: 11, color: "#888" }}>
+                                            {new Date(a.answeredAt).toLocaleString("en-IN", {
+                                                day: "numeric",
+                                                month: "short",
+                                                year: "numeric",
+                                                hour: "numeric",
+                                                minute: "2-digit",
+                                                hour12: true,
+                                            })}
+                                        </p>
+                                    </div>
+                                ))}
                             </div>
                         ))}
+
+                    
                         {hasOlderAnswers && (
                             <button onClick={() => loadAnswers(answersPage + 1)}>
                                 Show older answers
