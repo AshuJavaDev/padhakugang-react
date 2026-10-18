@@ -136,13 +136,28 @@ function CheckCode() {
                     </p>
 
                     {result.status === "ANSWERED" ? (
-                        <>
-                            <p style={{ margin: "12px 0 0", whiteSpace: "pre-line" }}>
-                                <strong>🎓 Mentor's answer:</strong> {result.answer}
+                                             <>
+                            <p style={{ margin: "12px 0 0" }}>
+                                <strong>
+                                    🎓 {(result.answers?.length || 1) > 1
+                                        ? `${result.answers.length} mentor answers`
+                                        : "Mentor's answer"}
+                                </strong>
                             </p>
-                            <p style={{ margin: "6px 0 0", fontSize: 12, color: "#888" }}>
-                                Answered by {result.answeredBy} · {formatDate(result.answeredAt)}
-                            </p>
+                            {(result.answers?.length
+                                ? result.answers
+                                : [{ answer: result.answer, answeredBy: result.answeredBy, answeredAt: result.answeredAt }]
+                            ).map((a, i) => (
+                                <div
+                                    key={i}
+                                    style={{ marginTop: 8, padding: 10, background: "#ffffff", borderRadius: 6 }}
+                                >
+                                    <p style={{ margin: 0, whiteSpace: "pre-line" }}>{a.answer}</p>
+                                    <p style={{ margin: "6px 0 0", fontSize: 12, color: "#888" }}>
+                                        Answered by {a.answeredBy} · {formatDate(a.answeredAt)}
+                                    </p>
+                                </div>
+                            ))}
                         </>
                     ) : (
                         <p style={{ margin: "12px 0 0" }}>{PENDING_MSG}</p>
