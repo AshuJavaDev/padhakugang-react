@@ -1,7 +1,10 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { readAdminSession, clearAdminSession, adminFetch } from "./adminAuth.js";
 import { ROOMS, roomLabel } from "./rooms.js";
+import { Client } from "@stomp/stompjs";
+import SockJS from "sockjs-client";
+
 
 const NAVY = "#0B1F3A";
 const BLUE = "#1F7AE0";
@@ -41,13 +44,25 @@ const secondaryBtn = {
   padding: "6px 12px",
   cursor: "pointer",
 };
+
 const textBox = {
+
   width: "100%",
   boxSizing: "border-box",
   padding: 8,
   borderRadius: 6,
   border: "1px solid #ccd",
   marginTop: 8,
+};
+
+const smallBtn = {
+  marginLeft: 6,
+  border: "1px solid #ccd",
+  background: "#fff",
+  borderRadius: 6,
+  padding: "1px 6px",
+  fontSize: 11,
+  cursor: "pointer",
 };
 
 function formatTime(t) {
@@ -80,6 +95,11 @@ function AdminDashboard() {
   const [openAdd, setOpenAdd] = useState(null); // which question's "Add your answer" box is open
   const [notice, setNotice] = useState("");
   const [expired, setExpired] = useState(false);
+    // E3: Room chat tab
+  const [chatMessages, setChatMessages] = useState([]); // CHAT + FILE messages
+  const [roomPeople, setRoomPeople] = useState([]);     // Who's here
+  const [mutedNames, setMutedNames] = useState([]);     // names with 🔇
+  const [liveConnected, setLiveConnected] = useState(false);
 
   async function loadLists() {
     if (!room) return;
@@ -105,6 +125,91 @@ function AdminDashboard() {
     const timer = setInterval(loadLists, 30000);
     return () => clearInterval(timer);
   }, [room]);
+
+    // E3: who is muted right now (needs mentor login → adminFetch)
+  async function loadMuted() {
+    const r = await adminFetch(`/admin/rooms/${room}/muted`);
+    if (r.expired) {
+      setExpired(true);
+      return;
+    }
+    if (r.ok) setMutedNames(r.data);
+  }
+
+  // E3: snapshot of the room — same public endpoints the student page uses
+  function loadChatSnapshot() {
+    fetch(`http://localhost:8080/api/rooms/${room}/participants`)
+      .then((res) => res.json())
+      .then((data) => setRoomPeople(data))
+      .catch((err) => console.error("participants failed:", err));
+
+    fetch(`http://localhost:8080/api/rooms/${room}/messages`)
+      .then((res) => res.json())
+      .then((data) => setChatMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE")))
+      .catch((err) => console.error("messages failed:", err));
+
+    loadMuted();
+  }
+
+  // E3: listen-only connection, open only while the Room chat tab is showing
+  useEffect(() => {
+    if (tab !== "chat" || !room) return;
+
+    const client = new Client({
+      webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
+      reconnectDelay: 5000,
+      onWebSocketClose: () => setLiveConnected(false),
+      onConnect: () => {
+        setLiveConnected(true);
+        client.subscribe(`/topic/room/${room}`, (message) => {       
+          const received = JSON.parse(message.body);
+
+          if (received.type === "JOIN") {
+            setRoomPeople((prev) =>
+              prev.some((p) => p.studentName === received.studentName) ? prev : [...prev, received]
+            );
+          } else if (received.type === "LEAVE") {
+            setRoomPeople((prev) =>
+              prev.filter((p) => p.studentName !== received.studentName)   
+            );
+          } else if (received.type === "CHAT" || received.type === "FILE") {
+            setChatMessages((prev) => [...prev, received]);
+          } else if (received.type === "MUTE_NOTICE") {
+            setMutedNames((prev) =>
+              prev.includes(received.studentName) ? prev : [...prev, received.studentName]   
+            );
+          }
+        });
+        // NO JOIN publish here — the mentor only listens, stays invisible
+        loadChatSnapshot(); // first connect AND every reconnect
+      },
+    });
+
+    client.activate();
+    return () => client.deactivate();                                               
+  }, [room, tab]);                                               
+
+
+    // E3: one function for all three moderation buttons
+  async function moderate(action, name) {           // action: "mute" | "unmute" | "kick"
+    if (action === "kick" && !window.confirm(`Kick ${name} from this room?`)) {  
+      return;                                        // mentor pressed Cancel
+    }
+
+    const r = await adminFetch(
+      `/admin/rooms/${room}/${action}/${encodeURIComponent(name)}`,                          
+      { method: "POST" }                                                      
+    );
+    if (r.expired) {
+      setExpired(true);
+      return;
+    }
+    setNotice(r.ok ? "✅ " + r.data : "⚠️ " + r.data);  // e.g. "Rahul has been muted."
+
+    // unmute sends no live message, so ask the server for the fresh list ourselves
+    if (action === "unmute") loadMuted();                                          
+  }
+
 
   async function sendAnswer(questionId) {
     const text = (drafts[questionId] || "").trim();
@@ -240,6 +345,7 @@ function AdminDashboard() {
         {[
           { id: "pending", label: `⏳ Pending (${pending.length})` },
           { id: "answered", label: `✅ Recently answered (${groups.length})` },
+          { id: "chat", label: "💬 Room chat" },
         ].map((t) => (
           <button
             key={t.id}
@@ -258,6 +364,8 @@ function AdminDashboard() {
           </button>
         ))}
       </div>
+          
+          
 
       {/* PENDING */}
       {tab === "pending" && (
@@ -359,6 +467,76 @@ function AdminDashboard() {
           })}
         </div>
       )}
+
+         
+      {/* ROOM CHAT — live, read-only (E3) */}
+      {tab === "chat" && (
+        <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+          {/* left: chat feed */}
+          <div style={{ ...card, flex: 2, minWidth: 260 }}>
+            <div style={{ fontSize: 12, marginBottom: 8 }}>
+              <span style={{ color: liveConnected ? "#2e7d32" : "#c62828", fontWeight: "bold" }}>
+                {liveConnected ? "● Live" : "● Connecting..."}
+              </span>{" "}
+              · read-only view
+            </div>
+
+            {chatMessages.length === 0 && (
+              <p style={{ color: "#888" }}>No messages yet in this room.</p>
+            )}
+
+            {chatMessages.map((msg, index) => (
+              <div key={index} style={{ padding: "4px 0", borderBottom: "1px solid #f0f0f0" }}>
+                <b>{msg.studentName}</b>
+                {mutedNames.includes(msg.studentName) && " 🔇"}:{" "}
+                {msg.type === "FILE"
+                  ? React.createElement(
+                      "a",
+                      { href: `http://localhost:8080${msg.fileUrl}`, target: "_blank", rel: "noreferrer" },
+                      "📎 " + msg.content
+                    )
+                  : msg.content}
+                <button style={smallBtn} title="Mute for 20 min"
+                  onClick={() => moderate("mute", msg.studentName)}>🔇</button>      
+                <button style={smallBtn} title="Kick from room"
+                  onClick={() => moderate("kick", msg.studentName)}>🚫</button>
+              </div>
+            ))}
+          </div>
+
+          {/* right: who's here */}
+          <div style={{ ...card, flex: 1, minWidth: 200 }}>
+            <div style={{ fontWeight: "bold", marginBottom: 8 }}>
+              Who's here ({roomPeople.length})
+            </div>
+            {roomPeople.map((p) => {
+              const isMuted = mutedNames.includes(p.studentName);                        
+              return (
+                <div key={p.studentName} style={{ padding: "6px 0", borderBottom: "1px solid #f0f0f0" }}>
+                  {p.studentName}
+                  {isMuted && <span style={badge}>🔇 muted</span>}
+                  <div>
+                    {isMuted ? (
+                      <button style={smallBtn} onClick={() => moderate("unmute", p.studentName)}>
+                        Unmute
+                      </button>
+                    ) : (
+                      <button style={smallBtn} onClick={() => moderate("mute", p.studentName)}>
+                        🔇 Mute
+                      </button>
+                    )}
+                    <button style={smallBtn}
+                      onClick={() => moderate("kick", p.studentName)}>                   
+                      🚫 Kick
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
