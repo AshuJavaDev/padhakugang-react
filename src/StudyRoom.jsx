@@ -55,6 +55,10 @@ function StudyRoom() {
     const stompClientRef = useRef(null);
     const fileInputRef = useRef(null);
 
+    // race fix: who joined / left while the participants fetch was on its way
+    const joinedDuringFetch = useRef(new Map());   // name → participant
+    const leftDuringFetch = useRef(new Set());     // names
+
     function updateField(field, value) {
         setJoinData((prev) => ({ ...prev, [field]: value }));
     }
@@ -64,7 +68,7 @@ function StudyRoom() {
         setJoined(true);
     }
 
-        function loadAnswers(page) {
+    function loadAnswers(page) {
         fetch(`http://localhost:8080/api/rooms/${joinData.room}/answers?page=${page}`)
             .then((res) => res.json())
             .then((data) => {
@@ -85,11 +89,20 @@ function StudyRoom() {
         setActiveTab(tab);
     }
 
-        function loadRoomData() {
+    function loadRoomData() {
+        // start a fresh diary for this fetch
+        joinedDuringFetch.current.clear();
+        leftDuringFetch.current.clear();
+
         fetch(`http://localhost:8080/api/rooms/${joinData.room}/participants`)
             .then((res) => res.json())
             .then((data) => {
-                setParticipants(data);
+                // snapshot from the server, then replay what happened while it was travelling
+                let list = data.filter((p) => !leftDuringFetch.current.has(p.studentName));
+                joinedDuringFetch.current.forEach((p, name) => {
+                    if (!list.some((x) => x.studentName === name)) list.push(p);
+                });
+                setParticipants(list);
             })
             .catch((err) => {
                 console.error("Failed to fetch participants:", err);
@@ -110,8 +123,8 @@ function StudyRoom() {
     useEffect(() => {
         if (!joined) return;
 
-           
-       
+
+
 
         const stompClient = new Client({
             webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
@@ -123,6 +136,8 @@ function StudyRoom() {
                     const received = JSON.parse(message.body);
 
                     if (received.type === "JOIN") {
+                        joinedDuringFetch.current.set(received.studentName, received);
+                        leftDuringFetch.current.delete(received.studentName);
                         setParticipants((prev) => {
                             const exists = prev.some(
                                 (p) => p.studentName === received.studentName
@@ -131,24 +146,26 @@ function StudyRoom() {
                             return [...prev, received];
                         });
                     } else if (received.type === "LEAVE") {
+                        leftDuringFetch.current.add(received.studentName);
+                        joinedDuringFetch.current.delete(received.studentName);
                         setParticipants((prev) =>
                             prev.filter((p) => p.studentName !== received.studentName)
                         );
-                    } else if(received.type === "MUTE_NOTICE") {
-                            if(received.studentName === joinData.name) {
-                                alert(received.content);
-                            }
-                    } else if(received.type === "KICK") {
-                        if(received.studentName === joinData.name) {
+                    } else if (received.type === "MUTE_NOTICE") {
+                        if (received.studentName === joinData.name) {
+                            alert(received.content);
+                        }
+                    } else if (received.type === "KICK") {
+                        if (received.studentName === joinData.name) {
                             alert("You have been removed from this room by a moderator.");
                             setMessages([]);
                             setParticipants([]);
                             setJoined(false);
                         }
-                    } else if(received.type === "MENTOR_ANSWER") {
+                    } else if (received.type === "MENTOR_ANSWER") {
                         loadAnswers(0);                       // refresh the Mentor tab list
                         setUnreadAnswers((n) => n + 1);       // red dot on the tab
-                    } else if(received.type === "CHAT" || received.type === "FILE") {
+                    } else if (received.type === "CHAT" || received.type === "FILE") {
                         setMessages((prev) => [...prev, received]);
                     }
                 });
@@ -170,7 +187,7 @@ function StudyRoom() {
                     destination: `/app/chat/${joinData.room}`,
                     body: JSON.stringify(joinMessage),
                 });
-                                loadRoomData();   // runs on first connect AND on every reconnect
+                loadRoomData();   // runs on first connect AND on every reconnect
             },
         });
 
@@ -252,7 +269,7 @@ function StudyRoom() {
         e.target.value = "";
     }
 
-        async function handleAskMentor() {
+    async function handleAskMentor() {
         if (!questionText.trim()) return;
 
         setAskingMentor(true);
@@ -292,7 +309,7 @@ function StudyRoom() {
         setAskingMentor(false);
     }
 
-       function downloadSlip(question) {
+    function downloadSlip(question) {
         const canvas = document.createElement("canvas");
         canvas.width = 600;
         canvas.height = 370;                      // CHANGED: 340 -> 370
@@ -305,11 +322,11 @@ function StudyRoom() {
         // navy top band with brand name
         ctx.fillStyle = "#0B1F3A";
         ctx.fillRect(0, 0, 600, 70);
-              ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = "#ffffff";
         ctx.font = "bold 28px Arial";
         ctx.fillText("PadhakuGang", 24, 38);              // moved up a little: 45 -> 38
 
-              // tagline under the brand name
+        // tagline under the brand name
         ctx.font = "italic 13px Arial";
         ctx.fillText("Study. Connect. Grow.", 24, 58);
 
@@ -343,7 +360,7 @@ function StudyRoom() {
         ctx.fillStyle = "#333333";
         ctx.font = "16px Arial";
         ctx.fillText("Code for: Ask a Mentor question (" + roomLabel + ")", 24, 200);
-               // fit the question inside the slip width (600 - 24 - 24 = 552px)
+        // fit the question inside the slip width (600 - 24 - 24 = 552px)
         let questionLine = "Question: " + fullText;
         if (ctx.measureText(questionLine).width > 552) {
             while (ctx.measureText(questionLine + "...").width > 552) {
@@ -354,7 +371,7 @@ function StudyRoom() {
         ctx.fillText(questionLine, 24, 228);                             // NEW line
         ctx.fillText("Created on: " + created, 24, 256);                            // y: 228 -> 256
         ctx.fillText("Mentors usually reply within 24 hours.", 24, 284);            // y: 256 -> 284
-               // website in brand blue, so it stands out
+        // website in brand blue, so it stands out
         const checkStart = "Check your answer: ";
         ctx.fillText(checkStart, 24, 312);
         const checkStartWidth = ctx.measureText(checkStart).width;
@@ -392,7 +409,7 @@ function StudyRoom() {
     }
 
     const currentMood = MOODS.find((m) => m.id === joinData.mood);
-        // Group answer rows of the same question (original + copies) into one card
+    // Group answer rows of the same question (original + copies) into one card
     const answerGroups = [];
     const groupIndex = {};
     mentorAnswers.forEach((a) => {
@@ -512,7 +529,7 @@ function StudyRoom() {
                     </select>
                 </div>
 
-                        {import.meta.env.DEV && (
+                {import.meta.env.DEV && (
                     <div style={{ marginTop: 16 }}>
                         <button
                             type="button"
@@ -542,11 +559,11 @@ function StudyRoom() {
         );
     }
 
-    
+
     return (
         <div style={{ display: "flex", maxWidth: 700, margin: "0 auto", gap: 20 }}>
-          
-                      {/* LEFT: tabs */}
+
+            {/* LEFT: tabs */}
             <div style={{ flex: 2 }}>
                 <h2>
                     Welcome, {joinData.name}!
@@ -564,8 +581,8 @@ function StudyRoom() {
                         />
                     )}
                 </h2>
-                    
-                    <p style={{ fontSize: 12, color: "#666" }}>
+
+                <p style={{ fontSize: 12, color: "#666" }}>
                     Room: {ROOMS.find((r) => r.id === joinData.room)?.label}
                     {" · "}
                     <span style={{ color: connected ? "#2ecc71" : "#e74c3c", fontWeight: "bold" }}>
@@ -737,7 +754,7 @@ function StudyRoom() {
                         )}
 
 
-                                                {answerGroups.map((g) => (
+                        {answerGroups.map((g) => (
                             <div
                                 key={g.key}
                                 style={{
@@ -774,7 +791,7 @@ function StudyRoom() {
                             </div>
                         ))}
 
-                    
+
                         {hasOlderAnswers && (
                             <button onClick={() => loadAnswers(answersPage + 1)}>
                                 Show older answers
