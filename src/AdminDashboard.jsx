@@ -100,6 +100,8 @@ function AdminDashboard() {
   const [roomPeople, setRoomPeople] = useState([]);     // Who's here
   const [mutedNames, setMutedNames] = useState([]);     // names with 🔇
   const [liveConnected, setLiveConnected] = useState(false);
+  const [replyText, setReplyText] = useState("");   // E3 1b: mentor's reply box
+
 
   async function loadLists() {
     if (!room) return;
@@ -145,7 +147,7 @@ function AdminDashboard() {
 
     fetch(`http://localhost:8080/api/rooms/${room}/messages`)
       .then((res) => res.json())
-      .then((data) => setChatMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE")))
+      .then((data) => setChatMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE" || m.type === "MENTOR_CHAT")))
       .catch((err) => console.error("messages failed:", err));
 
     loadMuted();
@@ -172,7 +174,7 @@ function AdminDashboard() {
             setRoomPeople((prev) =>
               prev.filter((p) => p.studentName !== received.studentName)   
             );
-          } else if (received.type === "CHAT" || received.type === "FILE") {
+            } else if (received.type === "CHAT" || received.type === "FILE" || received.type === "MENTOR_CHAT") {   // blank 9
             setChatMessages((prev) => [...prev, received]);
           } else if (received.type === "MUTE_NOTICE") {
             setMutedNames((prev) =>
@@ -210,6 +212,23 @@ function AdminDashboard() {
     if (action === "unmute") loadMuted();                                          
   }
 
+
+    // E3 1b: mentor reply inside the room chat
+  async function sendReply() {
+    const text = replyText.trim();
+    if (!text) return;
+    const r = await adminFetch(`/admin/rooms/${room}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),                    // blank 11: the field name the backend reads
+    });
+    if (r.expired) {
+      setExpired(true);
+      return;
+    }
+    if (r.ok) setReplyText("");          // the message comes back through the live channel
+    else setNotice("⚠️ " + r.data);
+  }
 
   async function sendAnswer(questionId) {
     const text = (drafts[questionId] || "").trim();
@@ -478,30 +497,62 @@ function AdminDashboard() {
               <span style={{ color: liveConnected ? "#2e7d32" : "#c62828", fontWeight: "bold" }}>
                 {liveConnected ? "● Live" : "● Connecting..."}
               </span>{" "}
-              · read-only view
+              · live view
             </div>
 
             {chatMessages.length === 0 && (
               <p style={{ color: "#888" }}>No messages yet in this room.</p>
             )}
 
-            {chatMessages.map((msg, index) => (
-              <div key={index} style={{ padding: "4px 0", borderBottom: "1px solid #f0f0f0" }}>
-                <b>{msg.studentName}</b>
-                {mutedNames.includes(msg.studentName) && " 🔇"}:{" "}
-                {msg.type === "FILE"
-                  ? React.createElement(
-                      "a",
-                      { href: `http://localhost:8080${msg.fileUrl}`, target: "_blank", rel: "noreferrer" },
-                      "📎 " + msg.content
-                    )
-                  : msg.content}
-                <button style={smallBtn} title="Mute for 20 min"
-                  onClick={() => moderate("mute", msg.studentName)}>🔇</button>      
-                <button style={smallBtn} title="Kick from room"
-                  onClick={() => moderate("kick", msg.studentName)}>🚫</button>
-              </div>
-            ))}
+                       {chatMessages.map((msg, index) => {
+              const fromMentor = msg.type === "MENTOR_CHAT";
+              return (
+                <div
+                  key={index}
+                  style={{
+                    padding: "4px 6px",
+                    borderBottom: "1px solid #f0f0f0",
+                    background: fromMentor ? "#eef6ff" : "transparent",
+                    borderLeft: fromMentor ? `3px solid ${BLUE}` : "3px solid transparent",
+                  }}
+                >
+                  <b>{fromMentor && "🎓 "}{msg.studentName}</b>
+                  {fromMentor && <span style={{ ...badge, background: BLUE, color: "#fff" }}>Mentor</span>}
+                  {mutedNames.includes(msg.studentName) && " 🔇"}:{" "}
+                  {msg.type === "FILE"
+                    ? React.createElement(
+                        "a",
+                        { href: `http://localhost:8080${msg.fileUrl}`, target: "_blank", rel: "noreferrer" },
+                        "📎 " + msg.content
+                      )
+                    : msg.content}
+                  {!fromMentor && (
+                    <>
+                      <button style={smallBtn} title="Mute for 20 min"
+                        onClick={() => moderate("mute", msg.studentName)}>🔇</button>
+                      <button style={smallBtn} title="Kick from room"
+                        onClick={() => moderate("kick", msg.studentName)}>🚫</button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* E3 1b: mentor reply box */}
+            <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+              <input
+                type="text"
+                maxLength={500}
+                placeholder="Reply in the room as Mentor..."
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendReply()}
+                style={{ ...textBox, marginTop: 0 }}
+              />
+              <button onClick={sendReply} style={{ ...primaryBtn, marginTop: 0 }}>
+                Send
+              </button>
+            </div>
           </div>
 
           {/* right: who's here */}

@@ -111,7 +111,7 @@ function StudyRoom() {
         fetch(`http://localhost:8080/api/rooms/${joinData.room}/messages`)
             .then((res) => res.json())
             .then((data) => {
-                setMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE"));
+                setMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE" || m.type === "MENTOR_CHAT"));
             })
             .catch((err) => {
                 console.error("Failed to fetch message history:", err);
@@ -165,8 +165,9 @@ function StudyRoom() {
                     } else if (received.type === "MENTOR_ANSWER") {
                         loadAnswers(0);                       // refresh the Mentor tab list
                         setUnreadAnswers((n) => n + 1);       // red dot on the tab
-                    } else if (received.type === "CHAT" || received.type === "FILE") {
+                    } else if (received.type === "CHAT" || received.type === "FILE" || received.type === "MENTOR_CHAT") {   
                         setMessages((prev) => [...prev, received]);
+                    
                     }
                 });
 
@@ -202,9 +203,9 @@ function StudyRoom() {
     function handleSend() {
         if (!messageInput.trim()) return;
 
-        const chatMessage = {
-            type: "CHAT",
-            studentName: joinData.name,
+            const chatMessage = {
+            type: "CHAT",              
+            studentName: joinData.name,   
             content: messageInput,
             roomId: joinData.room,
         };
@@ -647,6 +648,36 @@ function StudyRoom() {
                     <div>
                         <div>
                             {messages.map((msg, index) => {
+                                                                if (msg.type === "MENTOR_CHAT") {
+                                    return (
+                                        <div
+                                            key={index}
+                                            style={{
+                                                margin: "6px 0",
+                                                padding: "6px 10px",
+                                                background: "#eef6ff",
+                                                borderLeft: "4px solid #1F7AE0",
+                                                borderRadius: 6,
+                                                textAlign: "left",
+                                            }}
+                                        >
+                                            <strong>🎓 {msg.studentName}</strong>{" "}                
+                                            <span
+                                                style={{
+                                                    fontSize: 11,
+                                                    background: "#1F7AE0",
+                                                    color: "#fff",
+                                                    borderRadius: 8,
+                                                    padding: "1px 6px",
+                                                }}
+                                            >
+                                                Mentor
+                                            </span>
+                                            <div style={{ marginTop: 2 }}>{msg.content}</div>   
+                                        </div>
+                                    );
+                                }
+
                                 if (msg.type === "FILE") {
                                     return (
                                         <p key={index}>
