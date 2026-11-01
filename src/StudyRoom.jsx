@@ -21,6 +21,15 @@ const LOOKING_FOR_OPTIONS = [
     "Open to doubt-solving",
 ];
 
+// E3 step 2: report reasons (ids must match the backend list)
+const REPORT_REASONS = [
+    { id: "SPAM", label: "Spam" },
+    { id: "ABUSE", label: "Abusive or inappropriate" },
+    { id: "ILLEGAL", label: "Illegal or dangerous" },
+    { id: "DANGER", label: "Someone may be in danger" },
+    { id: "OTHER", label: "Other" },
+];
+
 
 function StudyRoom() {
     const [joined, setJoined] = useState(false);
@@ -52,6 +61,8 @@ function StudyRoom() {
     const [hasOlderAnswers, setHasOlderAnswers] = useState(false);
     const [unreadAnswers, setUnreadAnswers] = useState(0);
     const [connected, setConnected] = useState(false);
+    const [reportFor, setReportFor] = useState(null);
+    const [reportReason, setReportReason] = useState("SPAM");
     const stompClientRef = useRef(null);
     const fileInputRef = useRef(null);
 
@@ -165,9 +176,9 @@ function StudyRoom() {
                     } else if (received.type === "MENTOR_ANSWER") {
                         loadAnswers(0);                       // refresh the Mentor tab list
                         setUnreadAnswers((n) => n + 1);       // red dot on the tab
-                    } else if (received.type === "CHAT" || received.type === "FILE" || received.type === "MENTOR_CHAT") {   
+                    } else if (received.type === "CHAT" || received.type === "FILE" || received.type === "MENTOR_CHAT") {
                         setMessages((prev) => [...prev, received]);
-                    
+
                     }
                 });
 
@@ -200,12 +211,60 @@ function StudyRoom() {
         };
     }, [joined, joinData.room]);
 
+
+    // E3 step 2: send a report for one message (only its server id, never the text)
+    async function submitReport(messageId) {
+        try {
+            const res = await fetch(`http://localhost:8080/api/rooms/${joinData.room}/reports`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ messageId, reporterName: joinData.name, reason: reportReason }),
+            });
+            alert(await res.text());   // backend sends a plain-text answer, e.g. "Reported. Mentors will review it."
+        } catch (err) {
+            alert("Could not send the report. Please try again.");
+        }
+        setReportFor(null);
+        setReportReason("SPAM");
+    }
+
+
+    // E3 step 2: 🚩 button + small reason box next to someone else's message
+    function reportControls(msg) {
+        if (!msg.id || msg.studentName === joinData.name) return null;
+
+        if (reportFor !== msg.id) {
+            return (
+                <button
+                    type="button"
+                    title="Report this message"
+                    onClick={() => setReportFor(msg.id)}
+                    style={{ marginLeft: 6, fontSize: 11, border: "none", background: "transparent", cursor: "pointer" }}
+                >
+                    🚩
+                </button>
+            );
+        }
+
+        return (
+            <span style={{ marginLeft: 6, fontSize: 12 }}>
+                <select value={reportReason} onChange={(e) => setReportReason(e.target.value)}>
+                    {REPORT_REASONS.map((r) => (
+                        <option key={r.id} value={r.id}>{r.label}</option>
+                    ))}
+                </select>{" "}
+                <button type="button" onClick={() => submitReport(msg.id)}>Send</button>{" "}
+                <button type="button" onClick={() => setReportFor(null)}>Cancel</button>
+            </span>
+        );
+    }
+
     function handleSend() {
         if (!messageInput.trim()) return;
 
-            const chatMessage = {
-            type: "CHAT",              
-            studentName: joinData.name,   
+        const chatMessage = {
+            type: "CHAT",
+            studentName: joinData.name,
             content: messageInput,
             roomId: joinData.room,
         };
@@ -648,7 +707,7 @@ function StudyRoom() {
                     <div>
                         <div>
                             {messages.map((msg, index) => {
-                                                                if (msg.type === "MENTOR_CHAT") {
+                                if (msg.type === "MENTOR_CHAT") {
                                     return (
                                         <div
                                             key={index}
@@ -661,7 +720,7 @@ function StudyRoom() {
                                                 textAlign: "left",
                                             }}
                                         >
-                                            <strong>🎓 {msg.studentName}</strong>{" "}                
+                                            <strong>🎓 {msg.studentName}</strong>{" "}
                                             <span
                                                 style={{
                                                     fontSize: 11,
@@ -673,7 +732,7 @@ function StudyRoom() {
                                             >
                                                 Mentor
                                             </span>
-                                            <div style={{ marginTop: 2 }}>{msg.content}</div>   
+                                            <div style={{ marginTop: 2 }}>{msg.content}</div>
                                         </div>
                                     );
                                 }
@@ -692,12 +751,14 @@ function StudyRoom() {
                                                 },
                                                 msg.content
                                             )}
+                                            {reportControls(msg)}
                                         </p>
                                     );
                                 }
                                 return (
                                     <p key={index}>
                                         <strong>{msg.studentName}: </strong> {msg.content}
+                                        {reportControls(msg)}
                                     </p>
                                 );
                             })}
