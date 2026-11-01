@@ -65,6 +65,15 @@ const smallBtn = {
   cursor: "pointer",
 };
 
+// E3 step 2: short labels for report reasons
+const REASON_LABEL = {
+  SPAM: "Spam",
+  ABUSE: "Abusive",
+  ILLEGAL: "Illegal / dangerous",
+  DANGER: "Someone in danger",
+  OTHER: "Other",
+};
+
 function formatTime(t) {
   if (!t) return "";
   return new Date(t).toLocaleString("en-IN", {
@@ -101,7 +110,8 @@ function AdminDashboard() {
   const [mutedNames, setMutedNames] = useState([]);     // names with 🔇
   const [liveConnected, setLiveConnected] = useState(false);
   const [replyText, setReplyText] = useState("");   // E3 1b: mentor's reply box
-
+  const [radar, setRadar] = useState([]);     // E3 step 2: open reports in this room
+  const [urgent, setUrgent] = useState([]);   // E3 step 2: urgent reports, all rooms (SUPER_ADMIN only)
 
   async function loadLists() {
     if (!room) return;
@@ -119,6 +129,21 @@ function AdminDashboard() {
       return;
     }
     if (a.ok) setAnswered(a.data);
+  
+
+      // E3 step 2: radar for this room
+    const r = await adminFetch(`/admin/rooms/${room}/radar`);
+    if (r.expired) {
+      setExpired(true);
+      return;
+    }
+    if (r.ok) setRadar(r.data);
+
+    // E3 step 2: 🚨 urgent list — only the SUPER_ADMIN may ask for it
+    if (isSuper) {                                            // blank 1
+      const u = await adminFetch(`/admin/radar/urgent`);
+      if (u.ok) setUrgent(u.data);
+    }
   }
 
   // load now, then refresh every 30 seconds; stop the timer when the room changes or the page closes
@@ -213,6 +238,21 @@ function AdminDashboard() {
   }
 
 
+    // E3 step 2: close all open reports of one student in this room
+  async function dismiss(name) {
+    const r = await adminFetch(
+      `/admin/rooms/${room}/radar/${encodeURIComponent(name)}/dismiss`,   // blank 2
+      { method: "POST" }
+    );
+    if (r.expired) {
+      setExpired(true);
+      return;
+    }
+    setNotice(r.ok ? "✅ " + r.data : "⚠️ " + r.data);
+    loadLists();
+  }
+
+
     // E3 1b: mentor reply inside the room chat
   async function sendReply() {
     const text = replyText.trim();
@@ -276,6 +316,19 @@ function AdminDashboard() {
   groups.forEach((g) =>
     g.answers.sort((x, y) => new Date(x.answeredAt) - new Date(y.answeredAt))
   );
+
+    // E3 step 2: one card per reported student
+  const radarGroups = [];
+  const byName = {};
+  for (const rep of radar) {
+    if (!byName[rep.reportedName]) {
+      byName[rep.reportedName] = { name: rep.reportedName, reports: [], reporters: new Set() };
+      radarGroups.push(byName[rep.reportedName]);
+    }
+    byName[rep.reportedName].reports.push(rep);
+    byName[rep.reportedName].reporters.add(rep.reporterName);   // blank 3: Set — add a name
+  }
+
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 16px 40px" }}>
@@ -365,6 +418,7 @@ function AdminDashboard() {
           { id: "pending", label: `⏳ Pending (${pending.length})` },
           { id: "answered", label: `✅ Recently answered (${groups.length})` },
           { id: "chat", label: "💬 Room chat" },
+          { id: "radar", label: `🚩 On radar (${radarGroups.length})` },
         ].map((t) => (
           <button
             key={t.id}
@@ -585,6 +639,60 @@ function AdminDashboard() {
               );
             })}
           </div>
+        </div>
+      )}
+
+            {/* ON RADAR — reported students (E3 step 2) */}
+      {tab === "radar" && (
+        <div>
+          {isSuper && urgent.length > 0 && (
+            <div style={{ ...card, background: "#fdecea", border: "1px solid #e57373" }}>
+              <div style={{ fontWeight: "bold", color: "#c62828", marginBottom: 6 }}>
+                🚨 Urgent ({urgent.length}) · all rooms
+              </div>
+              {urgent.map((u) => (
+                <div key={u.id} style={{ fontSize: 13, padding: "4px 0", borderBottom: "1px solid #f5c6c6" }}>
+                  <b>{u.reportedName}</b> in {roomLabel(u.roomId)} · {REASON_LABEL[u.reason]} · {formatTime(u.createdAt)}
+                  <div style={{ color: "#555" }}>"{u.messageContent}"</div>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: "#888", marginTop: 6 }}>
+                To act, pick that room above and use its list below.
+              </div>
+            </div>
+          )}
+
+          {radarGroups.length === 0 && (
+            <p style={{ color: "#888" }}>✅ No one is on radar in this room.</p>
+          )}
+
+          {radarGroups.map((g) => (
+            <div key={g.name} style={card}>
+              <div style={{ fontWeight: "bold" }}>
+                {g.name}
+                <span style={badge}>reported by {g.reporters.size} student(s)</span>  
+                {g.reports.some((x) => x.urgent) && (
+                  <span style={{ ...badge, background: "#fdecea", color: "#c62828" }}>🚨 urgent</span>
+                )}
+              </div>
+              {g.reports.map((rep) => (
+                <div
+                  key={rep.id}
+                  style={{ background: "#fafafa", borderLeft: "3px solid #e57373", borderRadius: 6, padding: "6px 8px", marginTop: 6, fontSize: 13 }}
+                >
+                  <div style={{ fontSize: 11, color: "#888" }}>
+                    {REASON_LABEL[rep.reason]} · {formatTime(rep.createdAt)}
+                  </div>
+                  "{rep.messageContent}"
+                </div>
+              ))}
+              <div style={{ marginTop: 8 }}>
+                <button style={smallBtn} onClick={() => moderate("mute", g.name)}>🔇 Mute</button>
+                <button style={smallBtn} onClick={() => moderate("kick", g.name)}>🚫 Kick</button>
+                <button style={smallBtn} onClick={() => dismiss(g.name)}>✅ Dismiss</button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
