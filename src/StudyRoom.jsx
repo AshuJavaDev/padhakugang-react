@@ -21,6 +21,20 @@ const LOOKING_FOR_OPTIONS = [
     "Open to doubt-solving",
 ];
 
+// #1: class / stage — step #2 (age worlds) uses this to decide which rooms a student can open
+const STAGES = [
+    { id: "class-6-8", label: "Class 6–8" },
+    { id: "class-9-10", label: "Class 9–10" },
+    { id: "class-11", label: "Class 11" },
+    { id: "class-12", label: "Class 12" },
+    { id: "dropper", label: "Dropper (NEET / JEE)" },
+    { id: "college", label: "College student" },
+    { id: "graduate", label: "Graduate / Working / Other aspirant" },
+];
+
+// #1: gender — private (never broadcast), required only for "Need a study partner"
+const GENDERS = ["Female", "Male", "Other"];
+
 // E3 step 2: report reasons (ids must match the backend list)
 const REPORT_REASONS = [
     { id: "SPAM", label: "Spam" },
@@ -44,8 +58,12 @@ function StudyRoom() {
         bio: "",
         lookingFor: "",
         room: ROOMS[0].id,
+        stage: "",        // #1
+        gender: "",       // #1 (private)
+        agreed: false,    // #1 T&C checkbox
     });
 
+    const [joinError, setJoinError] = useState("");   // #1: small red message instead of a popup
     const [messages, setMessages] = useState([]);
     const [participants, setParticipants] = useState([]);
     const [messageInput, setMessageInput] = useState("");
@@ -72,10 +90,28 @@ function StudyRoom() {
 
     function updateField(field, value) {
         setJoinData((prev) => ({ ...prev, [field]: value }));
+        setJoinError("");   // #1: clear the message as soon as the student edits
     }
 
+    // #1: check the required fields before joining
     function handleJoin() {
-        if (!joinData.name.trim()) return;
+        if (!joinData.name.trim()) {
+            setJoinError("Please enter your name.");
+            return;
+        }
+        if (!joinData.stage) {
+            setJoinError("Please choose your class / stage.");
+            return;
+        }
+        if (joinData.lookingFor === "Need a study partner" && !joinData.gender) {
+            setJoinError("Please choose your gender — it is needed to find a study partner.");
+            return;
+        }
+        if (!joinData.agreed) {
+            setJoinError("Please agree to the Terms and Conditions to join.");
+            return;
+        }
+        setJoinError("");
         setJoined(true);
     }
 
@@ -193,6 +229,7 @@ function StudyRoom() {
                     subject: joinData.subject,
                     bio: joinData.bio,
                     lookingFor: joinData.lookingFor,
+                    stage: joinData.stage,   // #1 (gender is NOT sent — it stays private)
                 };
 
                 stompClient.publish({
@@ -372,19 +409,19 @@ function StudyRoom() {
     function downloadSlip(question) {
         const canvas = document.createElement("canvas");
         canvas.width = 600;
-        canvas.height = 370;                      // CHANGED: 340 -> 370
+        canvas.height = 370;
         const ctx = canvas.getContext("2d");
 
         // white background
         ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, 600, 370);             // CHANGED: 340 -> 370
+        ctx.fillRect(0, 0, 600, 370);
 
         // navy top band with brand name
         ctx.fillStyle = "#0B1F3A";
         ctx.fillRect(0, 0, 600, 70);
         ctx.fillStyle = "#ffffff";
         ctx.font = "bold 28px Arial";
-        ctx.fillText("PadhakuGang", 24, 38);              // moved up a little: 45 -> 38
+        ctx.fillText("PadhakuGang", 24, 38);
 
         // tagline under the brand name
         ctx.font = "italic 13px Arial";
@@ -407,7 +444,7 @@ function StudyRoom() {
         // question in one clean line
         const fullText = (question.questionText || "").replace(/\s+/g, " ").trim();
 
-        // CHANGED: friendlier date -> "6 Oct 2026, 1:07 pm"
+        // friendlier date -> "6 Oct 2026, 1:07 pm"
         const created = new Date(question.createdAt).toLocaleString("en-IN", {
             day: "numeric",
             month: "short",
@@ -428,9 +465,9 @@ function StudyRoom() {
             }
             questionLine = questionLine.trimEnd() + "...";
         }
-        ctx.fillText(questionLine, 24, 228);                             // NEW line
-        ctx.fillText("Created on: " + created, 24, 256);                            // y: 228 -> 256
-        ctx.fillText("Mentors usually reply within 24 hours.", 24, 284);            // y: 256 -> 284
+        ctx.fillText(questionLine, 24, 228);
+        ctx.fillText("Created on: " + created, 24, 256);
+        ctx.fillText("Mentors usually reply within 24 hours.", 24, 284);
         // website in brand blue, so it stands out
         const checkStart = "Check your answer: ";
         ctx.fillText(checkStart, 24, 312);
@@ -441,14 +478,14 @@ function StudyRoom() {
         const siteWidth = ctx.measureText("www.padhakugang.com").width;
         ctx.fillStyle = "#333333";
         ctx.font = "16px Arial";
-        ctx.fillText(" > Check your code", 24 + checkStartWidth + siteWidth, 312); // y: 284 -> 312
+        ctx.fillText(" > Check your code", 24 + checkStartWidth + siteWidth, 312);
         ctx.fillStyle = "#888888";
         ctx.font = "13px Arial";
         ctx.fillText(
             question.privateQuestion
                 ? "Private question: only this code shows the answer."
                 : "Public question: the answer will also appear in the room.",
-            24, 346                                                                 // y: 318 -> 346
+            24, 346
         );
 
         // turn the board into a PNG and download it
@@ -495,6 +532,22 @@ function StudyRoom() {
                     value={joinData.name}
                     onChange={(e) => updateField("name", e.target.value)}
                 />
+
+                {/* #1: class / stage (required) */}
+                <div style={{ marginTop: 10 }}>
+                    <label>You are: * </label>
+                    <select
+                        value={joinData.stage}
+                        onChange={(e) => updateField("stage", e.target.value)}
+                    >
+                        <option value="">-- Select --</option>
+                        {STAGES.map((s) => (
+                            <option key={s.id} value={s.id}>
+                                {s.label}
+                            </option>
+                        ))}
+                    </select>
+                </div>
 
                 <div style={{ marginTop: 10 }}>
                     <label>Room: </label>
@@ -589,6 +642,45 @@ function StudyRoom() {
                     </select>
                 </div>
 
+                {/* #1: gender — private, required only for "Need a study partner" */}
+                <div style={{ marginTop: 10 }}>
+                    <label>
+                        Gender{joinData.lookingFor === "Need a study partner" ? " *" : " (optional)"}:{" "}
+                    </label>
+                    <select
+                        value={joinData.gender}
+                        onChange={(e) => updateField("gender", e.target.value)}
+                    >
+                        <option value="">-- Select --</option>
+                        {GENDERS.map((g) => (
+                            <option key={g} value={g}>
+                                {g}
+                            </option>
+                        ))}
+                    </select>
+                    <p style={{ fontSize: 11, color: "#888", margin: "2px 0 0" }}>
+                        Not shown to others in the room.
+                    </p>
+                </div>
+
+                {/* #1: required Terms and Conditions checkbox */}
+                <div style={{ marginTop: 12, fontSize: 13 }}>
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={joinData.agreed}
+                            onChange={(e) => updateField("agreed", e.target.checked)}
+                        />{" "}
+                        I agree to all{" "}
+                        {React.createElement(
+                            "a",
+                            { href: "/terms", target: "_blank", rel: "noreferrer" },
+                            "Terms and Conditions"
+                        )}{" "}
+                        of the room and I have read it
+                    </label>
+                </div>
+
                 {import.meta.env.DEV && (
                     <div style={{ marginTop: 16 }}>
                         <button
@@ -604,6 +696,9 @@ function StudyRoom() {
                                     bio: "Just testing PadhakuGang",
                                     lookingFor: "Just here to focus",
                                     room: "bihar-police",
+                                    stage: "graduate",   // #1
+                                    gender: "",          // #1
+                                    agreed: true,        // #1
                                 })
                             }
                         >
@@ -613,7 +708,10 @@ function StudyRoom() {
                 )}
 
                 <div style={{ marginTop: 16 }}>
-                    <button onClick={handleJoin}>Join</button>
+                    <button onClick={handleJoin} disabled={!joinData.agreed}>Join</button>
+                    {joinError && (
+                        <p style={{ color: "#e74c3c", fontSize: 13, margin: "6px 0 0" }}>{joinError}</p>
+                    )}
                 </div>
             </div>
         );
@@ -905,6 +1003,7 @@ function StudyRoom() {
                 <h4>Who's here ({participants.length})</h4>
                 {participants.map((p, index) => {
                     const pMood = MOODS.find((m) => m.id === p.mood);
+                    const pStage = STAGES.find((s) => s.id === p.stage);   // #1
                     return (
                         <div
                             key={index}
@@ -927,6 +1026,9 @@ function StudyRoom() {
                                         marginLeft: 6,
                                     }}
                                 />
+                            )}
+                            {pStage && (
+                                <p style={{ fontSize: 12, margin: "2px 0" }}>🏫 {pStage.label}</p>
                             )}
                             {p.exam && (
                                 <p style={{ fontSize: 12, margin: "2px 0" }}>📘 {p.exam}</p>
@@ -961,3 +1063,4 @@ function StudyRoom() {
 }
 
 export default StudyRoom;
+
