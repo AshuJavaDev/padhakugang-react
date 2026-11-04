@@ -3,7 +3,7 @@ import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import React from "react";
 import { saveCode } from "./savedCodes";
-import { ROOMS } from "./rooms";
+import { ROOMS, STAGES, roomLabel, canJoin, roomsForStage, openToText, titledName } from "./rooms";   // #2 + #2c
 
 
 
@@ -21,17 +21,6 @@ const LOOKING_FOR_OPTIONS = [
     "Open to doubt-solving",
 ];
 
-// #1: class / stage — step #2 (age worlds) uses this to decide which rooms a student can open
-const STAGES = [
-    { id: "class-6-8", label: "Class 6–8" },
-    { id: "class-9-10", label: "Class 9–10" },
-    { id: "class-11", label: "Class 11" },
-    { id: "class-12", label: "Class 12" },
-    { id: "dropper", label: "Dropper (NEET / JEE)" },
-    { id: "college", label: "College student" },
-    { id: "graduate", label: "Graduate / Working / Other aspirant" },
-];
-
 // #1: gender — private (never broadcast), required only for "Need a study partner"
 const GENDERS = ["Female", "Male", "Other"];
 
@@ -44,25 +33,45 @@ const REPORT_REASONS = [
     { id: "OTHER", label: "Other" },
 ];
 
+// #2b: remember the join form on this device (mood is never saved — it's picked fresh each day)
+const SAVED_PROFILE_KEY = "pg_join_profile";
+
+const EMPTY_JOIN = {
+    name: "",
+    mood: "",
+    exam: "",
+    college: "",
+    city: "",
+    subject: "",
+    bio: "",
+    lookingFor: "",
+    room: "",         // #2: student picks the exam room first
+    stage: "",        // #1
+    gender: "",       // #1 (private)
+    agreed: false,    // #1 T&C checkbox
+};
+
+function readSavedProfile() {
+    try {
+        const raw = localStorage.getItem(SAVED_PROFILE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+        return null;   // storage blocked or broken data → just start empty
+    }
+}
+
 
 function StudyRoom() {
     const [joined, setJoined] = useState(false);
 
-    const [joinData, setJoinData] = useState({
-        name: "",
+    // #2b: start with the saved details (if any), but always with an empty mood
+    const [joinData, setJoinData] = useState(() => ({
+        ...EMPTY_JOIN,
+        ...(readSavedProfile() || {}),
         mood: "",
-        exam: "",
-        college: "",
-        city: "",
-        subject: "",
-        bio: "",
-        lookingFor: "",
-        room: ROOMS[0].id,
-        stage: "",        // #1
-        gender: "",       // #1 (private)
-        agreed: false,    // #1 T&C checkbox
-    });
+    }));
 
+    const [remember, setRemember] = useState(true);   // #2b
     const [joinError, setJoinError] = useState("");   // #1: small red message instead of a popup
     const [messages, setMessages] = useState([]);
     const [participants, setParticipants] = useState([]);
@@ -93,14 +102,37 @@ function StudyRoom() {
         setJoinError("");   // #1: clear the message as soon as the student edits
     }
 
-    // #1: check the required fields before joining
+    // #2b: forget the saved details (for shared computers in libraries / cafés)
+    function clearSavedProfile() {
+        try {
+            localStorage.removeItem(SAVED_PROFILE_KEY);
+        } catch (e) {
+            // ignore
+        }
+        setJoinData(EMPTY_JOIN);
+        setJoinError("");
+    }
+
+    // #1 + #2: check the required fields and the room's "open to" list before joining
     function handleJoin() {
         if (!joinData.name.trim()) {
             setJoinError("Please enter your name.");
             return;
         }
+        if (!joinData.room) {
+            setJoinError("Please choose the exam room you want to join.");
+            return;
+        }
         if (!joinData.stage) {
             setJoinError("Please choose your class / stage.");
+            return;
+        }
+        if (!canJoin(joinData.room, joinData.stage)) {
+            const options = roomsForStage(joinData.stage).map((r) => r.label).join(", ");
+            setJoinError(
+                `${roomLabel(joinData.room)} is open to: ${openToText(joinData.room)}. ` +
+                `For your stage you can join: ${options}.`
+            );
             return;
         }
         if (joinData.lookingFor === "Need a study partner" && !joinData.gender) {
@@ -111,6 +143,19 @@ function StudyRoom() {
             setJoinError("Please agree to the Terms and Conditions to join.");
             return;
         }
+
+        // #2b: save (or forget) the details on this device — everything except today's mood
+        try {
+            if (remember) {
+                const { mood, ...toSave } = joinData;
+                localStorage.setItem(SAVED_PROFILE_KEY, JSON.stringify(toSave));
+            } else {
+                localStorage.removeItem(SAVED_PROFILE_KEY);
+            }
+        } catch (e) {
+            // storage blocked → joining still works
+        }
+
         setJoinError("");
         setJoined(true);
     }
@@ -170,9 +215,6 @@ function StudyRoom() {
     useEffect(() => {
         if (!joined) return;
 
-
-
-
         const stompClient = new Client({
             webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
             reconnectDelay: 5000,
@@ -209,12 +251,19 @@ function StudyRoom() {
                             setParticipants([]);
                             setJoined(false);
                         }
+                    } else if (received.type === "JOIN_DENIED") {
+                        // #2: the server refused this join (room not open to this stage)
+                        if (received.studentName === joinData.name) {
+                            setMessages([]);
+                            setParticipants([]);
+                            setJoinError(received.content);
+                            setJoined(false);
+                        }
                     } else if (received.type === "MENTOR_ANSWER") {
                         loadAnswers(0);                       // refresh the Mentor tab list
                         setUnreadAnswers((n) => n + 1);       // red dot on the tab
                     } else if (received.type === "CHAT" || received.type === "FILE" || received.type === "MENTOR_CHAT") {
                         setMessages((prev) => [...prev, received]);
-
                     }
                 });
 
@@ -439,7 +488,7 @@ function StudyRoom() {
         ctx.fillText(question.statusCode, 24, 160);
 
         // details
-        const roomLabel = ROOMS.find((r) => r.id === question.roomId)?.label || question.roomId;
+        const slipRoomLabel = roomLabel(question.roomId);   // #2: shared helper from rooms.js
 
         // question in one clean line
         const fullText = (question.questionText || "").replace(/\s+/g, " ").trim();
@@ -456,7 +505,7 @@ function StudyRoom() {
 
         ctx.fillStyle = "#333333";
         ctx.font = "16px Arial";
-        ctx.fillText("Code for: Ask a Mentor question (" + roomLabel + ")", 24, 200);
+        ctx.fillText("Code for: Ask a Mentor question (" + slipRoomLabel + ")", 24, 200);
         // fit the question inside the slip width (600 - 24 - 24 = 552px)
         let questionLine = "Question: " + fullText;
         if (ctx.measureText(questionLine).width > 552) {
@@ -522,6 +571,7 @@ function StudyRoom() {
     );
 
     if (!joined) {
+        const hasSavedProfile = readSavedProfile() !== null;   // #2b
         return (
             <div style={{ maxWidth: 420, margin: "0 auto" }}>
                 <h2>Join a Study Room</h2>
@@ -532,6 +582,27 @@ function StudyRoom() {
                     value={joinData.name}
                     onChange={(e) => updateField("name", e.target.value)}
                 />
+
+                {/* #2: exam room first, with who it is open to */}
+                <div style={{ marginTop: 10 }}>
+                    <label>Exam room: * </label>
+                    <select
+                        value={joinData.room}
+                        onChange={(e) => updateField("room", e.target.value)}
+                    >
+                        <option value="">-- Select --</option>
+                        {ROOMS.map((r) => (
+                            <option key={r.id} value={r.id}>
+                                {r.label}
+                            </option>
+                        ))}
+                    </select>
+                    {joinData.room && (
+                        <p style={{ fontSize: 11, color: "#888", margin: "2px 0 0" }}>
+                            👥 Open to: {openToText(joinData.room)}
+                        </p>
+                    )}
+                </div>
 
                 {/* #1: class / stage (required) */}
                 <div style={{ marginTop: 10 }}>
@@ -544,20 +615,6 @@ function StudyRoom() {
                         {STAGES.map((s) => (
                             <option key={s.id} value={s.id}>
                                 {s.label}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                    <label>Room: </label>
-                    <select
-                        value={joinData.room}
-                        onChange={(e) => updateField("room", e.target.value)}
-                    >
-                        {ROOMS.map((r) => (
-                            <option key={r.id} value={r.id}>
-                                {r.label}
                             </option>
                         ))}
                     </select>
@@ -681,6 +738,29 @@ function StudyRoom() {
                     </label>
                 </div>
 
+                {/* #2b: remember on this device + clear option for shared computers */}
+                <div style={{ marginTop: 8, fontSize: 12, color: "#555" }}>
+                    <label>
+                        <input
+                            type="checkbox"
+                            checked={remember}
+                            onChange={(e) => setRemember(e.target.checked)}
+                        />{" "}
+                        Remember my details on this device
+                    </label>
+                    {hasSavedProfile && (
+                        <div>
+                            <button
+                                type="button"
+                                onClick={clearSavedProfile}
+                                style={{ marginTop: 4, fontSize: 11, border: "none", background: "transparent", color: "#1F7AE0", cursor: "pointer", textDecoration: "underline" }}
+                            >
+                                Not you? Clear saved details
+                            </button>
+                        </div>
+                    )}
+                </div>
+
                 {import.meta.env.DEV && (
                     <div style={{ marginTop: 16 }}>
                         <button
@@ -689,13 +769,13 @@ function StudyRoom() {
                                 setJoinData({
                                     name: "Tester" + Math.floor(Math.random() * 100),
                                     mood: "awesome",
-                                    exam: "Bihar Daroga",
+                                    exam: "SSC CGL",
                                     college: "Test College",
                                     city: "Dhanbad, Jharkhand",
                                     subject: "Reasoning",
                                     bio: "Just testing PadhakuGang",
                                     lookingFor: "Just here to focus",
-                                    room: "bihar-police",
+                                    room: "ssc",
                                     stage: "graduate",   // #1
                                     gender: "",          // #1
                                     agreed: true,        // #1
@@ -724,7 +804,7 @@ function StudyRoom() {
             {/* LEFT: tabs */}
             <div style={{ flex: 2 }}>
                 <h2>
-                    Welcome, {joinData.name}!
+                    Welcome, {titledName(joinData.room, joinData.name)}!
                     {currentMood && (
                         <span
                             title={currentMood.label}
@@ -741,7 +821,7 @@ function StudyRoom() {
                 </h2>
 
                 <p style={{ fontSize: 12, color: "#666" }}>
-                    Room: {ROOMS.find((r) => r.id === joinData.room)?.label}
+                    Room: {roomLabel(joinData.room)}
                     {" · "}
                     <span style={{ color: connected ? "#2ecc71" : "#e74c3c", fontWeight: "bold" }}>
                         {connected ? "● Connected" : "● Reconnecting..."}
@@ -838,7 +918,7 @@ function StudyRoom() {
                                 if (msg.type === "FILE") {
                                     return (
                                         <p key={index}>
-                                            <strong>{msg.studentName}: </strong>
+                                        <strong>{titledName(joinData.room, msg.studentName)}: </strong>
                                             shared a file —{" "}
                                             {React.createElement(
                                                 "a",
@@ -855,7 +935,7 @@ function StudyRoom() {
                                 }
                                 return (
                                     <p key={index}>
-                                        <strong>{msg.studentName}: </strong> {msg.content}
+                                    <strong>{titledName(joinData.room, msg.studentName)}: </strong> {msg.content}
                                         {reportControls(msg)}
                                     </p>
                                 );
@@ -1013,7 +1093,7 @@ function StudyRoom() {
                                 borderBottom: "1px solid #eee",
                             }}
                         >
-                            <strong>{p.studentName}</strong>
+                        <strong>{titledName(joinData.room, p.studentName)}</strong>
                             {pMood && (
                                 <span
                                     title={pMood.label}
@@ -1062,5 +1142,5 @@ function StudyRoom() {
     );
 }
 
-export default StudyRoom;
 
+export default StudyRoom;
