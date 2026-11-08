@@ -4,6 +4,7 @@ import SockJS from "sockjs-client";
 import React from "react";
 import { saveCode } from "./savedCodes";
 import { ROOMS, STAGES, roomLabel, canJoin, roomsForStage, openToText, titledName } from "./rooms";   // #2 + #2c
+import { useDm, DmPanel } from "./DmPanel";   // #3 DM
 
 
 
@@ -96,6 +97,11 @@ function StudyRoom() {
     // race fix: who joined / left while the participants fetch was on its way
     const joinedDuringFetch = useRef(new Map());   // name → participant
     const leftDuringFetch = useRef(new Set());     // names
+
+    // #3 DM: all DM state lives in useDm; the ref gives WebSocket callbacks the latest version
+    const dm = useDm({ stompClientRef, joinData, isTabOpen: activeTab === "messages" });
+    const dmRef = useRef(dm);
+    dmRef.current = dm;
 
     function updateField(field, value) {
         setJoinData((prev) => ({ ...prev, [field]: value }));
@@ -221,6 +227,13 @@ function StudyRoom() {
             onWebSocketClose: () => setConnected(false),
             onConnect: () => {
                 setConnected(true);
+                dmRef.current.reset();   // #3: new connection = new server session → old DMs are gone
+
+                // #3: my private letterbox — only this connection receives what lands here
+                stompClient.subscribe("/user/queue/dm", (message) => {
+                    dmRef.current.handleIncoming(JSON.parse(message.body));
+                });
+
                 stompClient.subscribe(`/topic/room/${joinData.room}`, (message) => {
                     const received = JSON.parse(message.body);
 
@@ -285,6 +298,7 @@ function StudyRoom() {
                     destination: `/app/chat/${joinData.room}`,
                     body: JSON.stringify(joinMessage),
                 });
+                dmRef.current.sendSettings();   // #3: private DM settings (incl. gender) — never in the JOIN above
                 loadRoomData();   // runs on first connect AND on every reconnect
             },
         });
@@ -846,6 +860,7 @@ function StudyRoom() {
                         { id: "chat", label: "💬 Chat" },
                         { id: "mentor", label: "🎓 Mentor" },
                         { id: "files", label: "📁 Files" },
+                        { id: "messages", label: "✉️ Messages" },   // #3
                     ].map((tab) => (
                         <button
                             key={tab.id}
@@ -874,6 +889,20 @@ function StudyRoom() {
                                     }}
                                 >
                                     {unreadAnswers}
+                                </span>
+                            )}
+                            {tab.id === "messages" && dm.unreadCount > 0 && activeTab !== "messages" && (
+                                <span
+                                    style={{
+                                        marginLeft: 6,
+                                        background: "#e74c3c",
+                                        color: "white",
+                                        borderRadius: 10,
+                                        padding: "1px 7px",
+                                        fontSize: 11,
+                                    }}
+                                >
+                                    {dm.unreadCount}
                                 </span>
                             )}
                         </button>
@@ -1070,6 +1099,11 @@ function StudyRoom() {
                     </div>
                 )}
 
+                {/* TAB 4: direct messages (#3) */}
+                {activeTab === "messages" && (
+                    <DmPanel dm={dm} room={joinData.room} myName={joinData.name} myGender={joinData.gender} />
+                )}
+
                 {/* TAB 3: files */}
                 {activeTab === "files" && (
                     <p style={{ fontSize: 13, color: "#888" }}>
@@ -1094,6 +1128,19 @@ function StudyRoom() {
                             }}
                         >
                         <strong>{titledName(joinData.room, p.studentName)}</strong>
+                            {p.studentName !== joinData.name && (
+                                <button
+                                    type="button"
+                                    title="Send a message request"
+                                    onClick={() => {
+                                        dm.requestDm(p.studentName);   // #3
+                                        switchTab("messages");
+                                    }}
+                                    style={{ marginLeft: 6, fontSize: 11 }}
+                                >
+                                    ✉️ Message
+                                </button>
+                            )}
                             {pMood && (
                                 <span
                                     title={pMood.label}
