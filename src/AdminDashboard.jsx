@@ -681,9 +681,19 @@ function AdminDashboard() {
                   style={{ background: "#fafafa", borderLeft: "3px solid #e57373", borderRadius: 6, padding: "6px 8px", marginTop: 6, fontSize: 13 }}
                 >
                   <div style={{ fontSize: 11, color: "#888" }}>
+                    {rep.kind === "DM" ? "✉️ Private chat · " : ""}
                     {REASON_LABEL[rep.reason]} · {formatTime(rep.createdAt)}
                   </div>
                   "{rep.messageContent}"
+                  {/* 3d: DM reports carry the last messages of the chat as evidence */}
+                  {rep.kind === "DM" && rep.transcript && (
+                    <details style={{ marginTop: 4 }}>
+                      <summary style={{ cursor: "pointer", fontSize: 12, color: "#555" }}>Show the chat</summary>
+                      <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 12, background: "#fff", border: "1px solid #eee", borderRadius: 6, padding: 6, margin: "4px 0 0" }}>
+                        {rep.transcript}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               ))}
               <div style={{ marginTop: 8 }}>

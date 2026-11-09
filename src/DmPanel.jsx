@@ -8,6 +8,15 @@ import { GATE_QUESTIONS, DEFAULT_GATE, CUSTOM_ID, buildGate } from "./dmQuestion
 const DM_SETTINGS_KEY = "pg_dm_settings";
 const MINOR_STAGES = ["class-6-8", "class-9-10", "class-11", "class-12"];
 
+// 3d: same reasons as reporting a room message
+const DM_REPORT_REASONS = [
+    { id: "SPAM", label: "Spam" },
+    { id: "ABUSE", label: "Abusive or inappropriate" },
+    { id: "ILLEGAL", label: "Illegal or dangerous" },
+    { id: "DANGER", label: "Someone may be in danger" },
+    { id: "OTHER", label: "Other" },
+];
+
 function readDmSettings(stage) {
     try {
         const raw = localStorage.getItem(DM_SETTINGS_KEY);
@@ -124,8 +133,8 @@ export function useDm({ stompClientRef, joinData, isTabOpen }) {
             }
             case "CHAT_CLOSED":
                 if (m.reason === "YOU") {
-                    setChats((prev) => prev.filter((c) => c.with !== m.with));
-                    if (activeChat === m.with) setActiveChat(null);
+                    // 3d: keep the closed chat on screen, so it can still be reported for 30 min
+                    updateChat(m.with, (c) => ({ ...c, closed: true, note: "You closed this chat." }));
                     setNotice(`Chat with ${m.with} closed.`);
                 } else {
                     const note =
@@ -135,6 +144,10 @@ export function useDm({ stompClientRef, joinData, isTabOpen }) {
                     updateChat(m.with, (c) => ({ ...c, closed: true, note }));
                     setNotice(note);   // replace an old "chat is open" notice
                 }
+                break;
+            case "DM_REPORTED":   // 3d
+                updateChat(m.with, (c) => ({ ...c, closed: true, reported: true, note: m.text }));
+                setNotice(m.text);
                 break;
             case "DM_ERROR":
                 setNotice(m.text);
@@ -187,6 +200,7 @@ export function useDm({ stompClientRef, joinData, isTabOpen }) {
         decline: (name) => publish({ type: "DECLINE", to: name }),
         sendDm: (name, text) => publish({ type: "SEND", to: name, text }),
         closeChat: (name) => publish({ type: "CLOSE", to: name }),
+        reportChat: (name, reason) => publish({ type: "REPORT", to: name, reason }),   // 3d
         openChatView, closeChatView: () => setActiveChat(null), dismissChat,
         clearNotice: () => setNotice(""),
     };
@@ -202,6 +216,7 @@ export function DmPanel({ dm, room, myName, myGender }) {
     const [showSettings, setShowSettings] = useState(false);
     const [draft, setDraft] = useState(dm.settings);
     const [text, setText] = useState("");
+    const [reportReason, setReportReason] = useState(null);   // 3d: null = report box hidden
 
     const chat = dm.chats.find((c) => c.with === dm.activeChat);
 
@@ -212,12 +227,41 @@ export function DmPanel({ dm, room, myName, myGender }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <button onClick={dm.closeChatView}>← Back</button>
                     <strong>💬 {titledName(room, chat.with)}</strong>
-                    {chat.closed ? (
-                        <button onClick={() => dm.dismissChat(chat.with)}>Remove</button>
-                    ) : (
-                        <button onClick={() => dm.closeChat(chat.with)}>Close chat</button>
-                    )}
+                    <span>
+                        {!chat.reported && chat.messages.some((m) => m.from === chat.with) && (
+                            <button title="Report this chat" onClick={() => setReportReason("")}>🚩</button>
+                        )}{" "}
+                        {chat.closed ? (
+                            <button onClick={() => dm.dismissChat(chat.with)}>Remove</button>
+                        ) : (
+                            <button onClick={() => dm.closeChat(chat.with)}>Close chat</button>
+                        )}
+                    </span>
                 </div>
+                {reportReason !== null && !chat.reported && (
+                    <div style={{ ...box, background: "#fff5f5" }}>
+                        <p style={{ margin: "0 0 6px" }}>
+                            🚩 Report {chat.with}? Mentors will see the last messages of this chat. The chat will end and{" "}
+                            {chat.with} won't be able to message you again.
+                        </p>
+                        <select value={reportReason} onChange={(e) => setReportReason(e.target.value)}>
+                            <option value="">Choose a reason…</option>
+                            {DM_REPORT_REASONS.map((r) => (
+                                <option key={r.id} value={r.id}>{r.label}</option>
+                            ))}
+                        </select>{" "}
+                        <button
+                            disabled={!reportReason}
+                            onClick={() => {
+                                dm.reportChat(chat.with, reportReason);
+                                setReportReason(null);
+                            }}
+                        >
+                            Send report
+                        </button>{" "}
+                        <button onClick={() => setReportReason(null)}>Cancel</button>
+                    </div>
+                )}
                 <p style={{ ...small, fontSize: 11 }}>Live chat: it ends when either of you leaves the room. Nothing is saved.</p>
                 <div style={{ ...box, minHeight: 120 }}>
                     {chat.messages.length === 0 && <p style={small}>Say hi 👋</p>}
