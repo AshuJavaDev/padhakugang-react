@@ -234,6 +234,24 @@ function StudyRoom() {
                     dmRef.current.handleIncoming(JSON.parse(message.body));
                 });
 
+                // MUST #4: mute / kick / join-denied now arrive ONLY here (private), no longer on the room topic
+                stompClient.subscribe("/user/queue/notice", (message) => {
+                    const notice = JSON.parse(message.body);
+                    if (notice.type === "MUTE_NOTICE") {
+                        alert(notice.content);
+                    } else if (notice.type === "KICK") {
+                        alert(notice.content || "You have been removed from this room by a mentor.");   // wording comes from the server
+                        setMessages([]);
+                        setParticipants([]);
+                        setJoined(false);
+                    } else if (notice.type === "JOIN_DENIED") {
+                        setMessages([]);
+                        setParticipants([]);
+                        setJoinError(notice.content);
+                        setJoined(false);
+                    }
+                });
+
                 stompClient.subscribe(`/topic/room/${joinData.room}`, (message) => {
                     const received = JSON.parse(message.body);
 
@@ -253,25 +271,6 @@ function StudyRoom() {
                         setParticipants((prev) =>
                             prev.filter((p) => p.studentName !== received.studentName)
                         );
-                    } else if (received.type === "MUTE_NOTICE") {
-                        if (received.studentName === joinData.name) {
-                            alert(received.content);
-                        }
-                    } else if (received.type === "KICK") {
-                        if (received.studentName === joinData.name) {
-                            alert("You have been removed from this room by a moderator.");
-                            setMessages([]);
-                            setParticipants([]);
-                            setJoined(false);
-                        }
-                    } else if (received.type === "JOIN_DENIED") {
-                        // #2: the server refused this join (room not open to this stage)
-                        if (received.studentName === joinData.name) {
-                            setMessages([]);
-                            setParticipants([]);
-                            setJoinError(received.content);
-                            setJoined(false);
-                        }
                     } else if (received.type === "MENTOR_ANSWER") {
                         loadAnswers(0);                       // refresh the Mentor tab list
                         setUnreadAnswers((n) => n + 1);       // red dot on the tab

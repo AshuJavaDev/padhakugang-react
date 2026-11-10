@@ -3,12 +3,14 @@
 //     node smoke-test/smoke.mjs
 // Admin checks (radar, mute, kick, clean-up) also run when a mentor login is given (PowerShell):
 //     $env:SMOKE_ADMIN_USER="ashu_admin"; $env:SMOKE_ADMIN_PASS="..."; node smoke-test/smoke.mjs
+// Runs in the real "ssc" room (leaves SmokeA/SmokeB messages in its history until a backend restart).
+// Never run it against the LIVE server once real students are there. Optional hidden room: $env:SMOKE_ROOM="smoke-lab" + backend PG_SMOKE_ROOM=on.
 // Add --email to use reason DANGER for the DM report, which sends a real urgent alert email.
 import SockJS from "sockjs-client";
 import { Client } from "@stomp/stompjs";
 
 const API = process.env.SMOKE_API || "http://localhost:8080";
-const ROOM = "ssc";
+const ROOM = process.env.SMOKE_ROOM || "ssc";   // real room by default; SMOKE_ROOM=smoke-lab uses the hidden test room (backend needs PG_SMOKE_ROOM=on)
 const RUN = Math.random().toString(36).slice(2, 6);          // unique names per run, e.g. SmokeA-k3f9
 const ADMIN_USER = process.env.SMOKE_ADMIN_USER;
 const ADMIN_PASS = process.env.SMOKE_ADMIN_PASS;
@@ -53,7 +55,7 @@ const participants = async () => (await http("GET", `/api/rooms/${ROOM}/particip
 
 // one fake student: connects, listens to the room topic + private DM letterbox, joins the room
 async function student(name, { stage = "graduate", privacy = false, gender = null, join = true } = {}) {
-    const s = { name, topic: [], dm: [], raw: [] };
+    const s = { name, topic: [], dm: [], raw: [], notice: [] };
     s.client = new Client({
         webSocketFactory: () => new SockJS(`${API}/ws`),
         reconnectDelay: 0, heartbeatIncoming: 0, heartbeatOutgoing: 0, debug: () => {},
@@ -65,6 +67,7 @@ async function student(name, { stage = "graduate", privacy = false, gender = nul
         s.client.activate();
     });
     s.client.subscribe("/user/queue/dm", (m) => s.dm.push(JSON.parse(m.body)));
+    s.client.subscribe("/user/queue/notice", (m) => s.notice.push(JSON.parse(m.body)));   // private KICK / MUTE / JOIN_DENIED
     s.client.subscribe(`/topic/room/${ROOM}`, (m) => s.topic.push(JSON.parse(m.body)));
     s.send = (body) => s.client.publish({ destination: `/app/chat/${ROOM}`, body: JSON.stringify(body) });
     s.dmSend = (body) => s.client.publish({ destination: "/app/dm", body: JSON.stringify(body) });
@@ -94,6 +97,9 @@ async function main() {
         const A = await mk(`SmokeA-${RUN}`, { gender: "Male" });
         const B = await mk(`SmokeB-${RUN}`, { gender: "Female" });
         const list = await participants();
+        if (!list.some((p) => p.studentName === A.name)) {
+            throw new Error(`A couldn't join room "${ROOM}". Is the backend running? (For smoke-lab: PG_SMOKE_ROOM=on.)`);
+        }
         check("A and B appear in Who's here", list.some((p) => p.studentName === A.name) && list.some((p) => p.studentName === B.name));
         check("A sees B's JOIN live", !!(await waitFor(A.topic, (m) => m.type === "JOIN" && m.studentName === B.name)));
         const pa = list.find((p) => p.studentName === A.name);
@@ -107,13 +113,14 @@ async function main() {
         section("2. Age worlds");
         const S = await mk(`SmokeKid-${RUN}`, { join: false });
         S.joinRoom("class-9-10");
-        check("Class 9–10 student gets JOIN_DENIED in an adult room",
-            !!(await waitFor(S.topic, (m) => m.type === "JOIN_DENIED" && m.studentName === S.name)));
+        check("Class 9–10 student gets JOIN_DENIED in an adult room (privately)",
+            !!(await waitFor(S.notice, (m) => m.type === "JOIN_DENIED")));
+        check("…and the rest of the room does NOT see it", !A.topic.some((m) => m.type === "JOIN_DENIED"));
         check("…and is NOT in Who's here", !(await participants()).some((p) => p.studentName === S.name));
         const N = await mk(`SmokeNoStage-${RUN}`, { join: false });
         N.joinRoom(null);
         check("JOIN with no stage is refused (not a server crash)",
-            !!(await waitFor(N.topic, (m) => m.type === "JOIN_DENIED" && m.studentName === N.name)));
+            !!(await waitFor(N.notice, (m) => m.type === "JOIN_DENIED")));
 
         // ---------------------------------------------------------------
         section("3. Security guards");
@@ -128,8 +135,13 @@ async function main() {
         check("SEND straight to /topic (skipping the server) is dropped", await never(A.topic, (m) => m.content === `bypass-${RUN}`, 800));
         M.send({ type: "CHAT", studentName: A.name, roomId: ROOM, content: `impersonate-${RUN}` });
         check("A student can't post under someone else's name",
-            await never(B.topic, (m) => m.content === `impersonate-${RUN}`, 800),
-            "KNOWN HOLE: CHAT trusts the name in the message body → fix in the security step");
+            await never(B.topic, (m) => m.content === `impersonate-${RUN}` && m.studentName === A.name, 800));
+        M.send({ type: "FILE", studentName: M.name, roomId: ROOM, content: "notes.pdf", fileUrl: `@evil.example/${RUN}` });
+        check("A fake FILE link to another website is dropped",
+            await never(A.topic, (m) => m.type === "FILE" && (m.fileUrl || "").includes(RUN), 800));
+        const G = await mk(`SmokeGhost-${RUN}`, { join: false });
+        G.send({ type: "CHAT", studentName: G.name, roomId: ROOM, content: `ghost-${RUN}` });
+        check("Chat without joining the room is dropped", await never(A.topic, (m) => m.content === `ghost-${RUN}`, 800));
 
         // ---------------------------------------------------------------
         section("4. Direct messages");
@@ -179,7 +191,33 @@ async function main() {
         check("The reported student is never told about the report", !A.dm.some((m) => m.type === "DM_REPORTED"));
 
         // ---------------------------------------------------------------
-        section("6. Mentor tools" + (ADMIN_USER ? "" : " (skipped: set SMOKE_ADMIN_USER and SMOKE_ADMIN_PASS)"));
+        section("6. Files");
+        const upload = async (room, name) => {
+            const fd = new FormData();
+            fd.append("file", new Blob([`smoke ${RUN}`], { type: "image/png" }), name);
+            const res = await fetch(`${API}/api/files/upload/${room}`, { method: "POST", body: fd });
+            let data = null; try { data = await res.json(); } catch { /* empty */ }
+            return { status: res.status, data };
+        };
+        const up1 = await upload(ROOM, `smoke-${RUN}.png`);
+        check("Upload a normal file → 200 with a download link", up1.status === 200 && !!up1.data?.downloadUrl, `got ${up1.status}`);
+        const dl = up1.data?.downloadUrl ? await fetch(API + up1.data.downloadUrl) : null;
+        check("…and it downloads", !!dl && dl.status === 200, `got ${dl?.status}`);
+        const up2 = await upload(ROOM, "../../evil.png");
+        check("Upload named ../../evil.png stays inside the room folder",
+            up2.status === 200 && !(up2.data?.downloadUrl || "").includes(".."), JSON.stringify(up2.data));
+        const up3 = await upload("no-such-room", `x-${RUN}.png`);
+        check("Upload to an unknown room → 400", up3.status === 400, `got ${up3.status}`);
+        const bad = await fetch(`${API}/api/files/download/${ROOM}/not-a-real-name.png`);
+        check("Download with a made-up file name → 400", bad.status === 400, `got ${bad.status}`);
+        if (up1.data?.downloadUrl) {
+            A.send({ type: "FILE", studentName: A.name, roomId: ROOM, content: `smoke-${RUN}.png`, fileUrl: up1.data.downloadUrl });
+            check("A real FILE message still reaches the room",
+                !!(await waitFor(B.topic, (m) => m.type === "FILE" && m.fileUrl === up1.data.downloadUrl)));
+        }
+
+        // ---------------------------------------------------------------
+        section("7. Mentor tools" + (ADMIN_USER ? "" : " (skipped: set SMOKE_ADMIN_USER and SMOKE_ADMIN_PASS)"));
         if (ADMIN_USER && ADMIN_PASS) {
             const login = await http("POST", "/auth/login", { username: ADMIN_USER, password: ADMIN_PASS });
             const token = login.data?.token;
@@ -192,6 +230,8 @@ async function main() {
 
                 const mu = await http("POST", `/admin/rooms/${ROOM}/mute/${encodeURIComponent(B.name)}`, null, token);
                 check("Mute B → 200", mu.status === 200, `got ${mu.status}`);
+                check("B is told privately that they're muted", !!(await waitFor(B.notice, (m) => m.type === "MUTE_NOTICE")));
+                check("…and others don't see the mute notice", !A.topic.some((m) => m.type === "MUTE_NOTICE"));
                 B.send({ type: "CHAT", studentName: B.name, roomId: ROOM, content: `while-muted-${RUN}` });
                 check("Muted B's message is dropped", await never(A.topic, (m) => m.content === `while-muted-${RUN}`, 800));
                 await http("POST", `/admin/rooms/${ROOM}/unmute/${encodeURIComponent(B.name)}`, null, token);
@@ -201,6 +241,10 @@ async function main() {
                 const k = await http("POST", `/admin/rooms/${ROOM}/kick/${encodeURIComponent(M.name)}`, null, token);
                 check("Kick M → 200 and M is out of Who's here",
                     k.status === 200 && !(await participants()).some((p) => p.studentName === M.name));
+                check("M is told privately about the kick", !!(await waitFor(M.notice, (m) => m.type === "KICK")));
+                check("…others see M leave, but no KICK on the room topic",
+                    !!(await waitFor(A.topic, (m) => m.type === "LEAVE" && m.studentName === M.name)) &&
+                    !A.topic.some((m) => m.type === "KICK"));
 
                 for (const n of [A.name, B.name]) {   // clean up this run's reports (rows are kept as DISMISSED)
                     await http("POST", `/admin/rooms/${ROOM}/radar/${encodeURIComponent(n)}/dismiss`, null, token);
