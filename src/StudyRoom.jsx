@@ -52,6 +52,27 @@ const EMPTY_JOIN = {
     agreed: false,    // #1 T&C checkbox
 };
 
+// MUST #4 same-name fix: a secret random code for THIS browser. Sent with JOIN, never shown to anyone.
+// Same code + same name = same person (reload / new tab). Another device using the name gets "Name NN".
+const DEVICE_KEY = "pg_device";
+// "Rahul 27" remembered for THIS tab only, so a page reload (or a phone reopening the tab) keeps the same number
+const GIVEN_NAME_KEY = "pg_given_name";
+
+function getDeviceCode() {
+    try {
+        let code = localStorage.getItem(DEVICE_KEY);
+        if (!code) {
+            const bytes = new Uint8Array(16);
+            crypto.getRandomValues(bytes);   // works on http too (randomUUID needs https)
+            code = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+            localStorage.setItem(DEVICE_KEY, code);
+        }
+        return code;
+    } catch (e) {
+        return null;   // storage blocked → server treats every visit as a new device
+    }
+}
+
 function readSavedProfile() {
     try {
         const raw = localStorage.getItem(SAVED_PROFILE_KEY);
@@ -92,6 +113,8 @@ function StudyRoom() {
     const [reportFor, setReportFor] = useState(null);
     const [reportReason, setReportReason] = useState("SPAM");
     const stompClientRef = useRef(null);
+    const myNameRef = useRef("");                       // MUST #4: the name the SERVER gave me (may be "Rahul 27")
+    const [nameNotice, setNameNotice] = useState("");   // "Rahul is already in this room, so you joined as Rahul 27"
     const fileInputRef = useRef(null);
 
     // race fix: who joined / left while the participants fetch was on its way
@@ -112,6 +135,7 @@ function StudyRoom() {
     function clearSavedProfile() {
         try {
             localStorage.removeItem(SAVED_PROFILE_KEY);
+            localStorage.removeItem(DEVICE_KEY);   // MUST #4: next person on this computer = a new device code
         } catch (e) {
             // ignore
         }
@@ -163,6 +187,18 @@ function StudyRoom() {
         }
 
         setJoinError("");
+        myNameRef.current = joinData.name.trim();   // MUST #4: the server may still change it (NAME_ASSIGNED)
+        setNameNotice("");
+        // MUST #4: this tab was "Rahul 27" in this room before a reload → come back as "Rahul 27", not a new number
+        try {
+            const given = JSON.parse(sessionStorage.getItem(GIVEN_NAME_KEY) || "null");
+            if (given && given.room === joinData.room && given.asked === myNameRef.current) {
+                myNameRef.current = given.given;
+                setJoinData((prev) => ({ ...prev, name: given.given }));
+            }
+        } catch (e) {
+            // storage blocked → a new number is fine
+        }
         setJoined(true);
     }
 
@@ -244,6 +280,19 @@ function StudyRoom() {
                         setMessages([]);
                         setParticipants([]);
                         setJoined(false);
+                    } else if (notice.type === "NAME_ASSIGNED") {
+                        // MUST #4: my name was taken by someone else → the server gave me "Name NN".
+                        // From now on this is "me" everywhere (Welcome, my messages, DMs, reports, reconnects).
+                        try {
+                            sessionStorage.setItem(GIVEN_NAME_KEY, JSON.stringify({
+                                room: joinData.room, asked: myNameRef.current, given: notice.studentName,
+                            }));
+                        } catch (e) {
+                            // ignore
+                        }
+                        myNameRef.current = notice.studentName;
+                        setJoinData((prev) => ({ ...prev, name: notice.studentName }));
+                        if (notice.content) setNameNotice(notice.content);
                     } else if (notice.type === "JOIN_DENIED") {
                         setMessages([]);
                         setParticipants([]);
@@ -281,7 +330,8 @@ function StudyRoom() {
 
                 const joinMessage = {
                     type: "JOIN",
-                    studentName: joinData.name,
+                    studentName: myNameRef.current || joinData.name,   // MUST #4: on reconnect keep "Rahul 27"
+                    deviceCode: getDeviceCode(),                       // MUST #4: secret, never broadcast
                     roomId: joinData.room,
                     mood: joinData.mood,
                     exam: joinData.exam,
@@ -592,6 +642,7 @@ function StudyRoom() {
                 <input
                     type="text"
                     placeholder="Your name *"
+                    maxLength={40}
                     value={joinData.name}
                     onChange={(e) => updateField("name", e.target.value)}
                 />
@@ -832,6 +883,24 @@ function StudyRoom() {
                         />
                     )}
                 </h2>
+                {/* MUST #4: my name was taken → explain the number once */}
+                {nameNotice && (
+                    <div
+                        style={{
+                            background: "#fff8e1",
+                            border: "1px solid #f0c36d",
+                            borderRadius: 6,
+                            padding: "8px 12px",
+                            margin: "0 0 10px",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 10,
+                        }}
+                    >
+                        <span>ℹ️ {nameNotice}</span>
+                        <button onClick={() => setNameNotice("")} title="Close">✕</button>
+                    </div>
+                )}
 
                 <p style={{ fontSize: 12, color: "#666" }}>
                     Room: {roomLabel(joinData.room)}

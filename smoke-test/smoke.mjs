@@ -54,7 +54,8 @@ async function http(method, path, body, token) {
 const participants = async () => (await http("GET", `/api/rooms/${ROOM}/participants`)).data || [];
 
 // one fake student: connects, listens to the room topic + private DM letterbox, joins the room
-async function student(name, { stage = "graduate", privacy = false, gender = null, join = true } = {}) {
+async function student(name, { stage = "graduate", privacy = false, gender = null, join = true,
+                               device = "dev-" + Math.random().toString(36).slice(2, 10) } = {}) {
     const s = { name, topic: [], dm: [], raw: [], notice: [] };
     s.client = new Client({
         webSocketFactory: () => new SockJS(`${API}/ws`),
@@ -72,7 +73,7 @@ async function student(name, { stage = "graduate", privacy = false, gender = nul
     s.send = (body) => s.client.publish({ destination: `/app/chat/${ROOM}`, body: JSON.stringify(body) });
     s.dmSend = (body) => s.client.publish({ destination: "/app/dm", body: JSON.stringify(body) });
     s.joinRoom = (stg = stage) => s.send({
-        type: "JOIN", studentName: name, roomId: ROOM, mood: "Ok ok", exam: "SSC CGL", college: "Smoke College",
+        type: "JOIN", studentName: name, deviceCode: device, roomId: ROOM, mood: "Ok ok", exam: "SSC CGL", college: "Smoke College",
         city: "Test City", subject: "Smoke testing", bio: "automated smoke test", lookingFor: "Just here to focus", stage: stg,
     });
     s.close = () => s.client.deactivate();
@@ -142,6 +143,41 @@ async function main() {
         const G = await mk(`SmokeGhost-${RUN}`, { join: false });
         G.send({ type: "CHAT", studentName: G.name, roomId: ROOM, content: `ghost-${RUN}` });
         check("Chat without joining the room is dropped", await never(A.topic, (m) => m.content === `ghost-${RUN}`, 800));
+
+        // ---------------------------------------------------------------
+        section("3b. Same name (\"Rahul 27\" fix)");
+        const SAME = `SmokeSame-${RUN}`;
+        const numbered = new RegExp(`^SmokeSame-${RUN} \\d+$`);
+        const H1 = await mk(SAME, { device: `devone-${RUN}` });
+        const H2 = await mk(SAME, { device: `devtwo-${RUN}` });
+        const renamed = await waitFor(H2.notice, (m) => m.type === "NAME_ASSIGNED");
+        check("Same name from ANOTHER device gets a number (privately told)",
+            !!renamed && numbered.test(renamed.studentName) && !!renamed.content, renamed ? renamed.studentName : "no NAME_ASSIGNED");
+        check("…the first student is NOT told anything", await never(H1.notice, (m) => m.type === "NAME_ASSIGNED", 500));
+        let plist = await participants();
+        check("…both are in Who's here (original kept, newcomer numbered)",
+            plist.some((p) => p.studentName === SAME) && !!renamed && plist.some((p) => p.studentName === renamed.studentName));
+        check("…the room hears the JOIN with the numbered name",
+            !!renamed && !!(await waitFor(A.topic, (m) => m.type === "JOIN" && m.studentName === renamed.studentName)));
+        check("Device code is never sent out (Who's here + broadcasts)",
+            !JSON.stringify(plist).includes(`devone-${RUN}`) && !JSON.stringify(A.topic).includes("deviceCode"));
+        H2.send({ type: "CHAT", studentName: SAME, roomId: ROOM, content: `numbered-${RUN}` });
+        const numMsg = await waitFor(A.topic, (m) => m.content === `numbered-${RUN}`);
+        check("Numbered student's chat shows the numbered name", !!numMsg && !!renamed && numMsg.studentName === renamed.studentName);
+        const H3 = await mk(SAME.toLowerCase(), { device: `devthree-${RUN}` });
+        const lower = await waitFor(H3.notice, (m) => m.type === "NAME_ASSIGNED");
+        check("Same name in different capitals also gets a number", !!lower && lower.studentName.startsWith(SAME.toLowerCase() + " "));
+        const H1b = await mk(SAME, { device: `devone-${RUN}` });   // same device again = page reload / new tab
+        check("Same name + SAME device (reload) keeps the name", await never(H1b.notice, (m) => m.type === "NAME_ASSIGNED", 800));
+        plist = await participants();
+        check("…and Who's here still shows that name only once", plist.filter((p) => p.studentName === SAME).length === 1);
+        const E = await mk("   ", { join: false });
+        E.joinRoom();
+        check("JOIN with a blank name is refused", !!(await waitFor(E.notice, (m) => m.type === "JOIN_DENIED")));
+        A.send({ type: "JOIN", studentName: `SmokeSecond-${RUN}`, roomId: ROOM, stage: "graduate" });
+        await sleep(500);
+        check("A second JOIN on the same connection is ignored (no ghost names)",
+            !(await participants()).some((p) => p.studentName === `SmokeSecond-${RUN}`));
 
         // ---------------------------------------------------------------
         section("4. Direct messages");
