@@ -4,6 +4,7 @@ import { readAdminSession, clearAdminSession, adminFetch } from "./adminAuth.js"
 import { ROOMS, roomLabel } from "./rooms.js";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
+import { API_URL } from "./config";   // deploy: backend address in one place
 
 
 const NAVY = "#0B1F3A";
@@ -165,12 +166,12 @@ function AdminDashboard() {
 
   // E3: snapshot of the room — same public endpoints the student page uses
   function loadChatSnapshot() {
-    fetch(`http://localhost:8080/api/rooms/${room}/participants`)
+    fetch(`${API_URL}/api/rooms/${room}/participants`)
       .then((res) => res.json())
       .then((data) => setRoomPeople(data))
       .catch((err) => console.error("participants failed:", err));
 
-    fetch(`http://localhost:8080/api/rooms/${room}/messages`)
+    fetch(`${API_URL}/api/rooms/${room}/messages`)
       .then((res) => res.json())
       .then((data) => setChatMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE" || m.type === "MENTOR_CHAT")))
       .catch((err) => console.error("messages failed:", err));
@@ -183,7 +184,7 @@ function AdminDashboard() {
     if (tab !== "chat" || !room) return;
 
     const client = new Client({
-      webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
+      webSocketFactory: () => new SockJS(`${API_URL}/ws`),
       reconnectDelay: 5000,
       onWebSocketClose: () => setLiveConnected(false),
       onConnect: () => {
@@ -576,7 +577,7 @@ function AdminDashboard() {
                   {msg.type === "FILE"
                     ? React.createElement(
                         "a",
-                        { href: `http://localhost:8080${msg.fileUrl}`, target: "_blank", rel: "noreferrer" },
+                        { href: `${API_URL}${msg.fileUrl}`, target: "_blank", rel: "noreferrer" },
                         "📎 " + msg.content
                       )
                     : msg.content}

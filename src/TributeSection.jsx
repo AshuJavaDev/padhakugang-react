@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { API_URL } from "./config";   // deploy: backend address in one place
 
-const API_BASE = "http://localhost:8080/api/tribute";
+const API_BASE = `${API_URL}/api/tribute`;
 
 function TributeSection() {
   const [messages, setMessages] = useState([]);

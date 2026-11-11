@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { saveAdminSession, readAdminSession } from "./adminAuth.js";
 import { useNavigate, Navigate, useLocation } from "react-router-dom";
+import { API_URL } from "./config";   // deploy: backend address in one place
 
 
-const API = "http://localhost:8080";
+const API = API_URL;
 
 function AdminLogin() {
   const navigate = useNavigate();

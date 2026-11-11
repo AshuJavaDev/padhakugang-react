@@ -1,3 +1,4 @@
+import { API_URL } from "./config";   // deploy: backend address in one place
 const KEY = "pg_admin";
 
 export function saveAdminSession(data)  {
@@ -39,7 +40,7 @@ export function readAdminSession()  {
         return null;
     } }
 
-    const API = "http://localhost:8080";
+    const API = API_URL;
 
 // fetch for admin pages: adds the token automatically.
 // Returns { ok, status, data }, or { expired: true } when the session is no longer valid.

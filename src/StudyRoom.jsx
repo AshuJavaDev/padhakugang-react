@@ -5,6 +5,7 @@ import React from "react";
 import { saveCode } from "./savedCodes";
 import { ROOMS, STAGES, roomLabel, canJoin, roomsForStage, openToText, titledName } from "./rooms";   // #2 + #2c
 import { useDm, DmPanel } from "./DmPanel";   // #3 DM
+import { API_URL } from "./config";   // deploy: backend address in one place
 
 
 
@@ -57,6 +58,8 @@ const EMPTY_JOIN = {
 const DEVICE_KEY = "pg_device";
 // "Rahul 27" remembered for THIS tab only, so a page reload (or a phone reopening the tab) keeps the same number
 const GIVEN_NAME_KEY = "pg_given_name";
+// Upload rules accepted on this device (bump the version if the wording changes, so everyone confirms again)
+const UPLOAD_RULES_KEY = "pg_upload_rules_v1";
 
 function getDeviceCode() {
     try {
@@ -70,6 +73,29 @@ function getDeviceCode() {
         return code;
     } catch (e) {
         return null;   // storage blocked → server treats every visit as a new device
+    }
+}
+
+// Upload helper: shrink a photo before upload (longest side 1600 px, JPEG ~80% quality).
+// Keeps the original if the shrunk copy isn't smaller or anything fails.
+async function shrinkImage(file) {
+    if (file.size < 300 * 1024) return file;                 // already small
+    try {
+        const bitmap = await createImageBitmap(file);
+        const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(bitmap.width * scale);
+        canvas.height = Math.round(bitmap.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";                            // PNG transparency → white, not black
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
+        if (!blob || blob.size >= file.size) return file;
+        const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+        return new File([blob], name, { type: "image/jpeg" });
+    } catch (e) {
+        return file;                                          // old browser → upload the original
     }
 }
 
@@ -136,6 +162,7 @@ function StudyRoom() {
         try {
             localStorage.removeItem(SAVED_PROFILE_KEY);
             localStorage.removeItem(DEVICE_KEY);   // MUST #4: next person on this computer = a new device code
+            localStorage.removeItem(UPLOAD_RULES_KEY);   // next person confirms the upload rules themselves
         } catch (e) {
             // ignore
         }
@@ -203,7 +230,7 @@ function StudyRoom() {
     }
 
     function loadAnswers(page) {
-        fetch(`http://localhost:8080/api/rooms/${joinData.room}/answers?page=${page}`)
+        fetch(`${API_URL}/api/rooms/${joinData.room}/answers?page=${page}`)
             .then((res) => res.json())
             .then((data) => {
                 // page 0 = fresh list, later pages = add below the old ones
@@ -228,7 +255,7 @@ function StudyRoom() {
         joinedDuringFetch.current.clear();
         leftDuringFetch.current.clear();
 
-        fetch(`http://localhost:8080/api/rooms/${joinData.room}/participants`)
+        fetch(`${API_URL}/api/rooms/${joinData.room}/participants`)
             .then((res) => res.json())
             .then((data) => {
                 // snapshot from the server, then replay what happened while it was travelling
@@ -242,7 +269,7 @@ function StudyRoom() {
                 console.error("Failed to fetch participants:", err);
             });
 
-        fetch(`http://localhost:8080/api/rooms/${joinData.room}/messages`)
+        fetch(`${API_URL}/api/rooms/${joinData.room}/messages`)
             .then((res) => res.json())
             .then((data) => {
                 setMessages(data.filter((m) => m.type === "CHAT" || m.type === "FILE" || m.type === "MENTOR_CHAT"));
@@ -258,7 +285,7 @@ function StudyRoom() {
         if (!joined) return;
 
         const stompClient = new Client({
-            webSocketFactory: () => new SockJS("http://localhost:8080/ws"),
+            webSocketFactory: () => new SockJS(`${API_URL}/ws`),
             reconnectDelay: 5000,
             onWebSocketClose: () => setConnected(false),
             onConnect: () => {
@@ -364,7 +391,7 @@ function StudyRoom() {
     // E3 step 2: send a report for one message (only its server id, never the text)
     async function submitReport(messageId) {
         try {
-            const res = await fetch(`http://localhost:8080/api/rooms/${joinData.room}/reports`, {
+            const res = await fetch(`${API_URL}/api/rooms/${joinData.room}/reports`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ messageId, reporterName: joinData.name, reason: reportReason }),
@@ -427,21 +454,62 @@ function StudyRoom() {
     }
 
     function handleAttachClick() {
+        // Before the FIRST upload on this device: the student confirms the sharing rules (remembered after that)
+        let agreed = false;
+        try { agreed = localStorage.getItem(UPLOAD_RULES_KEY) === "yes"; } catch (e) { /* storage blocked → ask each time */ }
+        if (!agreed) {
+            const ok = window.confirm(
+                "Before you share a file, please confirm:\n\n" +
+                "✅ This is my own material, or it's free to share (my notes, PYQs, NCERT, government material).\n" +
+                "✅ It is NOT a paid book, coaching material, or anything that breaks someone's copyright.\n" +
+                "✅ It follows the room rules.\n\n" +
+                "I am responsible for what I upload, and PadhakuGang may remove it if it breaks these rules.\n\n" +
+                "Press OK to agree and choose a file."
+            );
+            if (!ok) return;
+            try { localStorage.setItem(UPLOAD_RULES_KEY, "yes"); } catch (e) { /* ignore */ }
+        }
         fileInputRef.current.click();
     }
 
     async function handleFileChange(e) {
-        const file = e.target.files[0];
+        let file = e.target.files[0];
+        e.target.value = "";   // so choosing the same file again still triggers onChange
         if (!file) return;
 
+        // Check here first, so the student gets a clear message instead of a failed request
+        if (!["image/png", "image/jpeg", "application/pdf"].includes(file.type)) {
+            alert("Only images (PNG, JPG) and PDFs can be shared.");
+            return;
+        }
+
         setUploading(true);
+
+        // Photos are shrunk in the browser first (a 4 MB phone photo becomes ~0.5 MB, still sharp)
+        if (file.type !== "application/pdf") {
+            file = await shrinkImage(file);
+        }
+
+        const isPdf = file.type === "application/pdf";
+        const limitMb = isPdf ? 20 : 5;
+        if (file.size > limitMb * 1024 * 1024) {
+            const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+            alert(
+                `This file is ${sizeMb} MB (limit ${limitMb} MB).\n\n` +
+                (isPdf
+                    ? "Tip: compress it free at ilovepdf.com (Compress PDF), or share a link instead."
+                    : "Tip: try a smaller photo or a screenshot, or share a link instead.")
+            );
+            setUploading(false);
+            return;
+        }
 
         const formData = new FormData();
         formData.append("file", file);
 
         try {
             const res = await fetch(
-                `http://localhost:8080/api/files/upload/${joinData.room}`,
+                `${API_URL}/api/files/upload/${joinData.room}`,
                 {
                     method: "POST",
                     body: formData,
@@ -485,7 +553,7 @@ function StudyRoom() {
 
         try {
             const res = await fetch(
-                `http://localhost:8080/api/rooms/${joinData.room}/questions`,
+                `${API_URL}/api/rooms/${joinData.room}/questions`,
                 {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -1020,7 +1088,7 @@ function StudyRoom() {
                                             {React.createElement(
                                                 "a",
                                                 {
-                                                    href: `http://localhost:8080${msg.fileUrl}`,
+                                                    href: `${API_URL}${msg.fileUrl}`,
                                                     target: "_blank",
                                                     rel: "noreferrer",
                                                 },

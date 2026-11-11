@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { readSavedCodes, saveCode } from "./savedCodes";
+import { API_URL } from "./config";   // deploy: backend address in one place
 
 const PENDING_MSG =
     "⏳ Your question has reached our mentors. They usually reply within 24 hours, so please check back a little later. Your question is safe with us!";
@@ -44,7 +45,7 @@ function CheckCode() {
         setMessage("");
 
         try {
-            const res = await fetch(`http://localhost:8080/api/codes/${encodeURIComponent(clean)}`);
+            const res = await fetch(`${API_URL}/api/codes/${encodeURIComponent(clean)}`);
 
             if (res.status === 404 || res.status === 400) {
                 setMessage(NOT_FOUND_MSG);

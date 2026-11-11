@@ -1,11 +1,12 @@
 
 import { useState, useEffect } from 'react'
+import { API_URL } from "./config";   // deploy: backend address in one place
 
 function Notes() {
     const [notes, setNotes] = useState([]);
 
     useEffect(() => {
-        fetch('http://localhost:8080/notes')
+        fetch(`${API_URL}/notes`)
         .then(response => response.json())
         .then(data => setNotes(data))
         .catch(error => console.error('Error fetching notes: ', error));
