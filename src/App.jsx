@@ -15,6 +15,11 @@ function App() {
   return (
     <UserContext.Provider value = {{ nickname : "guest"}}> 
     <div>
+      {/* Preview banner - remove at the soft launch */}
+      <div style={{ background: "#8900ff", color: "#fff", textAlign: "center",
+                    padding: "6px 12px", fontSize: "14px" }}>
+        Preview · launching December 2026
+      </div>
       <Nav />
 
       <Routes>
