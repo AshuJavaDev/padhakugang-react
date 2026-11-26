@@ -5,6 +5,8 @@ import { ROOMS, roomLabel } from "./rooms.js";
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { API_URL } from "./config";   // deploy: backend address in one place
+import RoomFiles from "./RoomFiles.jsx";
+import MentorSwitches from "./MentorSwitches.jsx";
 
 
 const NAVY = "#0B1F3A";
@@ -112,6 +114,13 @@ function AdminDashboard() {
   const [liveConnected, setLiveConnected] = useState(false);
   const [replyText, setReplyText] = useState("");   // E3 1b: mentor's reply box
   const [radar, setRadar] = useState([]);     // E3 step 2: open reports in this room
+  const [myPerms, setMyPerms] = useState([]);   // which powers the super admin has switched on for me
+  useEffect(() => {
+    if (!readAdminSession()) return;
+    adminFetch("/admin/me/permissions").then((res) => {
+      if (res && res.ok && Array.isArray(res.data)) setMyPerms(res.data);
+    });
+  }, []);
   const [urgent, setUrgent] = useState([]);   // E3 step 2: urgent reports, all rooms (SUPER_ADMIN only)
 
   async function loadLists() {
@@ -420,6 +429,8 @@ function AdminDashboard() {
           { id: "answered", label: `✅ Recently answered (${groups.length})` },
           { id: "chat", label: "💬 Room chat" },
           { id: "radar", label: `🚩 On radar (${radarGroups.length})` },
+          { id: "files", label: "📁 Files" },
+          ...(isSuper ? [{ id: "mentors", label: "👥 Mentors" }] : []),
         ].map((t) => (
           <button
             key={t.id}
@@ -440,6 +451,22 @@ function AdminDashboard() {
       </div>
           
           
+
+      {/* FILES (pin / delete only if the super admin switched those powers on for this mentor) */}
+      {tab === "files" && (
+        <RoomFiles
+          roomId={room}
+          apiUrl={API_URL}
+          token={session.token}
+          isMentor={true}
+          canPin={myPerms.includes("FILES_PIN")}
+          canDelete={myPerms.includes("FILES_DELETE")}
+          studentName={session.username}
+        />
+      )}
+
+      {/* MENTORS (super admin only) */}
+      {tab === "mentors" && isSuper && <MentorSwitches onExpired={() => setExpired(true)} />}
 
       {/* PENDING */}
       {tab === "pending" && (

@@ -6,6 +6,7 @@ import { saveCode } from "./savedCodes";
 import { ROOMS, STAGES, roomLabel, canJoin, roomsForStage, openToText, titledName } from "./rooms";   // #2 + #2c
 import { useDm, DmPanel } from "./DmPanel";   // #3 DM
 import { API_URL } from "./config";   // deploy: backend address in one place
+import RoomFiles from "./RoomFiles.jsx";   // Files tab
 
 
 
@@ -506,6 +507,8 @@ function StudyRoom() {
 
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("uploaderName", joinData.name);                 // for the upload log + "by <name>" in the Files tab
+        formData.append("deviceCode", getDeviceCode() || "");
 
         try {
             const res = await fetch(
@@ -1242,9 +1245,13 @@ function StudyRoom() {
 
                 {/* TAB 3: files */}
                 {activeTab === "files" && (
-                    <p style={{ fontSize: 13, color: "#888" }}>
-                        📁 Files shared in this room will be listed here. Coming soon.
-                    </p>
+                    <RoomFiles
+                        roomId={joinData.room}
+                        apiUrl={API_URL}
+                        token={null}
+                        isMentor={false}
+                        studentName={joinData.name}
+                    />
                 )}
             </div>
 
